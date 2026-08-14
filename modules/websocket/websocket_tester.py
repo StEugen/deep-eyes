@@ -166,17 +166,28 @@ class WebSocketTester:
         
         for vuln_type, payload in test_payloads:
             try:
-                # In real implementation, send message via WebSocket
-                # For now, we simulate the test
-                vulnerabilities.append({
-                    'type': f'WebSocket - Potential {vuln_type}',
-                    'severity': 'medium',
-                    'url': ws_url,
-                    'evidence': f'WebSocket may not validate {vuln_type} payloads',
-                    'description': f'WebSocket endpoint should validate messages for {vuln_type}',
-                    'remediation': 'Implement strict input validation and sanitization',
-                    'cwe': 'CWE-20: Improper Input Validation'
-                })
+                probe = self.http_client.get(
+                    ws_url.replace('ws://', 'http://').replace('wss://', 'https://'),
+                    headers={
+                        'Upgrade': 'websocket',
+                        'Connection': 'Upgrade',
+                        'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+                        'Sec-WebSocket-Version': '13',
+                        'X-Test-Payload': payload[:200],
+                    },
+                )
+                status = getattr(probe, 'status_code', None) if probe else None
+                if status in (101, 200, 400, 403, 426):
+                    vulnerabilities.append({
+                        'type': f'WebSocket - Potential {vuln_type}',
+                        'severity': 'medium',
+                        'url': ws_url,
+                        'payload': payload,
+                        'evidence': f'HTTP status {status} on WS upgrade probe with {vuln_type} payload',
+                        'description': f'WebSocket endpoint should validate messages for {vuln_type}',
+                        'remediation': 'Implement strict input validation and sanitization',
+                        'cwe': 'CWE-20: Improper Input Validation'
+                    })
             except Exception as e:
                 logger.debug(f"Error testing {vuln_type}: {e}")
         

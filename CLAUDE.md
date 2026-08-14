@@ -1,120 +1,133 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for AI agents working in this repository.
 
 ## Overview
 
-Deep Eye is an AI-driven penetration testing tool. It orchestrates multiple AI providers for payload generation, scans targets for 45+ vulnerability types, and produces professional reports. Python 3.8+, MIT license, v1.4.0 (Code Name: Hanzou).
+Deep Eye is an AI-driven penetration testing tool. Multi-provider payload generation → crawl → 50+ vulnerability checks → enrichment (RAG/compliance/triage) → reports. Python 3.8+, MIT, v1.4.0 (code name **Hanzou**). Sync `requests` + `ThreadPoolExecutor` (not async).
 
 ## Commands
 
 ```bash
 # Setup
 pip install -r requirements.txt
+pip install -r requirements-dev.txt   # pytest, ruff
 cp config/config.example.yaml config/config.yaml
-
-# Browser automation (optional)
-pip install playwright && playwright install chromium
+# optional: pip install playwright && playwright install chromium
+# optional TLS evasion: pip install curl_cffi
 
 # Run
 python deep_eye.py -u https://example.com
-python deep_eye.py -c config/config.yaml
-python deep_eye.py -u https://example.com -v        # verbose
-python deep_eye.py -u https://example.com --no-banner
+python deep_eye.py -c config/config.yaml -v
+python deep_eye.py -u https://example.com --formats junit,csv,xlsx
+python deep_eye.py --diff baseline.json current.json --diff-format html
+python deep_eye.py -u https://example.com --retest-new baseline.json
+python deep_eye.py -u https://example.com --scope-nl "only /api/* no /logout host target.com"
 
-# CVE database update
+# CVE / RAG
 python scripts/update_cve_database.py
-
-# Build RAG index for CVE intelligence
 python scripts/build_cve_rag_index.py
 
 # Tests
 pytest
-pytest tests/test_litellm_provider.py -v            # single test file
-pytest tests/test_export_formats.py -v              # export formats
-pytest tests/test_compliance_mapping.py -v          # compliance
-pytest tests/test_scan_diff.py -v                   # scan diffing
-pytest tests/test_rag_index.py -v                   # RAG/CVE index
-pytest tests/test_ai_triage.py -v                   # AI triage
-pytest tests/test_captcha_detection.py -v           # CAPTCHA detection
-pytest tests/test_template_engine.py -v             # Nuclei-style templates
-pytest tests/test_challenge_solver.py -v            # CF/Akamai solver
-pytest tests/test_intercepting_proxy.py -v          # intercepting proxy
-python tests/e2e_litellm.py                         # e2e test (requires API key)
+pytest tests/test_features_1_19.py tests/test_bugfix_gaps.py -v
+pytest tests/test_template_engine.py tests/test_export_formats.py -v
+python tests/e2e_litellm.py   # needs API key
 ```
+
+Windows install: `.\scripts\install.ps1` (creates `.deep-venv/`).
 
 ## Architecture
 
-**Scan Flow**: CLI → `ScannerEngine` → Web Crawler → URL Discovery → `AIPayloadGenerator` → `VulnerabilityScanner` → `ReportGenerator`
+**Scan flow:**
+```
+CLI → ScannerEngine.scan
+  → login_replay? → recon? → subdomain?
+  → crawl + OpenAPI seed?
+  → AI planner? (threads/max_urls/order)
+  → per-URL: challenge_solver? captcha skip? payloads → VulnerabilityScanner
+       → browser? plugins? templates? extra modules? secrets?
+  → dedupe fingerprints
+  → FP replay? evidence summary?
+  → RAG → compliance → AI triage → bounty
+  → ReportGenerator + notifications
+  → checkpoint save
+```
 
 ### Layers
 
 | Layer | Purpose |
 |-------|---------|
-| `core/` | Orchestration: scanner engine, vuln scanner, AI payload gen, report gen, state manager, subdomain scanner, plugin manager, scan diff |
-| `ai_providers/` | Unified interface to OpenAI, Claude, Grok, OLLAMA, Gemini, Groq, Mistral, OpenRouter, LiteLLM, LM Studio. All implement `generate(prompt, **kwargs) -> str` |
-| `modules/` | Specialized testers (see Module Categories below) |
-| `utils/` | http_client, config_loader, parser, logger, notification_manager, exports (JUnit/CSV/XLSX), compliance mapper, scope_manager, oast_server, ai_summary_generator |
-| `scripts/` | CVE database updater, RAG index builder, notification tester |
+| `core/` | Orchestration, built-in checks, payloads, reports, plugins, diff, state |
+| `ai_providers/` | `generate(prompt, **kwargs) -> str` + `AIProviderManager` failover |
+| `modules/` | Attack modules (ctor `(http_client, config)`, `scan(url, context) -> List[Dict]`) |
+| `utils/` | HTTP, config, exports, compliance, scope, OAST, fingerprints, NL scope |
+| `config/` | `config.example.yaml` is source of truth |
+| `templates/` | Nuclei-style YAML (not report Jinja; reports use Jinja in report_generator) |
+| `plugins/` | `PluginBase` drop-ins |
+| `scripts/` | CVE DB + RAG builders |
+| `.agents/skills/` | Agent skills: pentest, bug-bounty, red-team, blue-team, ctf, security-ops |
 
-### Module Categories
+### Agent skills
 
-**Original**: api_security, authentication, browser_automation, business_logic, cve_intelligence, file_upload, ml_detection, payload_obfuscation, reconnaissance, reporting, secrets_scanner, websocket, collaboration
+When the user asks for pentest / bug bounty / red team / blue team / CTF work, load the matching skill from `.agents/skills/<name>/SKILL.md` (router: `security-ops`). Skills assume **authorized** targets only and point at this repo’s CLI/config/modules.
 
-**v1.4.0+**: nosql_injection, http_smuggling, race_condition, log4shell, mass_assignment, prototype_pollution, oauth_testing, cache_poisoning, subdomain_takeover, directory_bruteforce, port_scanner, saml_attacks, secret_scanning
+See `docs/SKILLS.md` and `.agents/skills/README.md`.
 
-**Hanzou-era**: ai_triage (AI false-positive filtering + bounty report writer), captcha_detection (CAPTCHA detect + login macro replay), template_engine (Nuclei-style YAML templates), challenge_solver (CF/Akamai challenge bypass), intercepting_proxy (mitmproxy-based interceptor)
+### Module categories
 
-### Key Design Decisions
+**Core / classic:** api_security, authentication, browser_automation, business_logic, cve_intelligence, file_upload, ml_detection, payload_obfuscation, reconnaissance, reporting, secrets_scanner, websocket, collaboration
 
-- **Config-driven**: Almost all behavior controlled via `config/config.yaml`. CLI is intentionally minimal (target URL, config path, verbose flag).
-- **Multi-threaded scanning**: `ScannerEngine` uses `ThreadPoolExecutor` for concurrent URL scanning. Thread count configurable 1-50.
-- **Browser automation is hybrid**: Playwright handles deterministic tests (SQLi, DOM XSS, clickjacking). Browser Use AI (experimental, disabled by default) handles intelligent tests. Automatic fallback to Playwright when AI unavailable.
-- **AI provider abstraction**: All providers share `generate()` interface. `provider_manager.py` handles failover/retry.
-- **State tracking**: `PentestStateManager` tracks phases (RECON → CRAWLING → VULNERABILITY_SCAN → REPORTING) with per-attack progress.
-- **Export formats**: JUnit XML (CI integration), CSV, XLSX via `utils/exports/`. Configured in `reporting.formats` list.
-- **Compliance mapping**: Maps findings to PCI-DSS v4, SOC2 CC, ISO 27001:2022 via `utils/compliance/`. Framework JSON definitions in `utils/compliance/frameworks/`.
-- **Scan diffing**: `core/scan_diff.py` compares two scan results to show new/fixed/unchanged findings. Rendered via `utils/exports/diff_renderer.py`.
+**v1.4+ attack classes:** nosql_injection, http_smuggling, race_condition, log4shell, mass_assignment, prototype_pollution, oauth_testing, cache_poisoning, subdomain_takeover, directory_bruteforce, port_scanner, saml_attacks, secret_scanning
 
-### Vulnerability Result Format
+**Hanzou-era (config-gated):** ai_triage, captcha_detection, login_replay, template_engine, challenge_solver, intercepting_proxy
 
-All scanners return dicts with: `type`, `severity` (critical/high/medium/low/info), `url`, `parameter`, `payload`, `evidence`, `remediation`, optional `cve_references`.
+**Feature pack (enabled_checks):** cors_csp, jwt_deep, graphql_deep, idor, stored_xss, email_injection, cache_deception, h2_smuggle, supply_chain_js, waf_fingerprint, ssrf_cloud
 
-## Development Patterns
+**Pipeline helpers:** openapi_ingest, auth_session, ai_planner, evidence_summary, fp_replay
 
-### Adding a vulnerability check
-1. Add `_check_new_vuln(self, url, payloads)` method to `core/vulnerability_scanner.py`
-2. Register in `scan()` with state manager start/end calls
-3. Add to `config.example.yaml` `enabled_checks` list
+### Key design rules
 
-### Adding an AI provider
-1. Create class in `ai_providers/` with `generate(prompt, **kwargs) -> str`
-2. Register in `provider_manager.py` `_initialize_providers()`
-3. Add config section to `config.example.yaml`
+- **Config-driven:** CLI is thin (`-u/-c/-v/--formats/--diff*/--retest-new/--scope-nl`). Behavior in YAML.
+- **Threads:** 1–50; crawl pool `min(threads, 10)`.
+- **Vuln dict:** `type`, `severity` (critical|high|medium|low|info), `url`, `parameter`, `payload`, `evidence`, `remediation`; optional `cve_references`, `fingerprint`, `plugin`, `ai_evidence_summary`.
+- **PDF:** ReportLab only (not WeasyPrint on Windows).
+- **OAST:** `scanner.oast_callback_url` or `oast.enabled` local server.
+- **TLS evasion:** `tls_evasion.enabled` + `curl_cffi` if installed.
+- **Dedupe:** `reporting.dedupe` (default true) via `utils/finding_fingerprint.py`.
+- **Deferred:** full async/httpx rewrite (Group I); plugin OS sandbox.
 
-### Adding a module
-1. Create directory in `modules/` with `__init__.py`
-2. Module class takes `(http_client, config)` in constructor
-3. Expose `scan(url) -> List[Dict]` following the vulnerability result format
-4. Register in scanner engine or plugin manager
+## Development patterns
 
-### Adding a plugin
-Create class in `plugins/` with `__init__(self, http_client, config)` and `scan(self, url) -> List[Dict]`. Enable via `plugin_manager.enabled: true` in config.
+### Add a vulnerability check (module)
 
-### Adding an export format
-1. Create builder in `utils/exports/` following `junit_builder.py` pattern
-2. Builder takes scan results list, returns bytes or string
-3. Register in `utils/exports/__init__.py`
+1. `modules/<name>/` with `__init__.py` + tester class
+2. Ctor `(http_client, config)`; `scan(url, context=None) -> List[Dict]`
+3. Register in `VulnerabilityScanner._feature_testers` **or** `ScannerEngine._init_extra_module_testers`
+4. Add name to `config.example.yaml` → `vulnerability_scanner.enabled_checks`
+5. Prefer new module over growing `vulnerability_scanner.py` further
 
-## Important Context
+### Add built-in `_check_*`
 
-- **Authorized testing only** — never scan without explicit permission
-- **Windows primary dev environment** — uses ReportLab (not WeasyPrint) for PDF, `pathlib.Path` for cross-platform paths
-- **Virtual env** at `.deep-venv/` (gitignored)
-- **SQLite databases**: `data/deep_eye.db` (scan results), `data/cve_intelligence.db` (CVE data)
-- **Experimental features** gated behind `experimental.*` config flags: CVE matching, subdomain scanning
-- **Notifications** (v1.3.0): Email/Slack/Discord via `utils/notification_manager.py`
-- **RAG index**: ChromaDB-based CVE search in `modules/cve_intelligence/rag_index.py`, built via `scripts/build_cve_rag_index.py`
-- **AI triage**: Uses LiteLLM for false-positive classification and bounty report generation (`modules/ai_triage/`)
-- **Template engine**: Nuclei-compatible YAML templates in `modules/template_engine/`, supports matchers/extractors/conditions
-- **Deferred**: async/httpx migration (would require full rewrite — current code uses synchronous `requests`)
+Only for small core checks: method on `VulnerabilityScanner`, gate on `enabled_checks`, wrap `state_manager.start_attack/end_attack`.
+
+### Add AI provider
+
+1. `ai_providers/<name>_provider.py` with `generate(prompt, **kwargs) -> str`
+2. Register in `provider_manager._initialize_providers`
+3. Config block under `ai_providers.<name>`
+
+### Add export format
+
+1. Pure builder in `utils/exports/`
+2. Export from `utils/exports/__init__.py`
+3. Wire in `report_generator` / CLI formats
+
+## Important context
+
+- Authorized targets only
+- Venv: `.deep-venv/` (install scripts use this name)
+- SQLite: `data/deep_eye.db`, `data/cve_intelligence.db`
+- RAG: TF-IDF pickle index (`modules/cve_intelligence/rag_index.py`), not only ChromaDB docs elsewhere may be stale
+- Hierarchical `AGENTS.md` under core/, modules/, utils/, tests/, packages
+- `CONTRIBUTING.md`: use `modules/<name>/` (not obsolete `modules/exploits/`)

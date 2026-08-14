@@ -21,17 +21,17 @@ fi
 
 # Create virtual environment
 echo ""
-echo "[*] Creating virtual environment..."
-if [ -d "$ROOT_DIR/venv" ]; then
+echo "[*] Creating virtual environment (.deep-venv)..."
+if [ -d "$ROOT_DIR/.deep-venv" ]; then
     echo "[*] Virtual environment already exists. Skipping..."
 else
-    python3 -m venv "$ROOT_DIR/venv"
+    python3 -m venv "$ROOT_DIR/.deep-venv"
     echo "[+] Virtual environment created"
 fi
 
 # Activate virtual environment
 echo "[*] Activating virtual environment..."
-source "$ROOT_DIR/venv/bin/activate"
+source "$ROOT_DIR/.deep-venv/bin/activate"
 
 # Upgrade pip
 echo ""
@@ -80,7 +80,7 @@ echo "===================================="
 echo ""
 echo "Next steps:"
 echo "1. Edit config/config.yaml and add your AI provider API keys"
-echo "2. Activate virtual environment: source venv/bin/activate"
+echo "2. Activate virtual environment: source .deep-venv/bin/activate"
 echo "3. Run Deep Eye: python deep_eye.py -u https://example.com"
 echo ""
 echo "For help: python deep_eye.py --help"

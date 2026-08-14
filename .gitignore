@@ -136,3 +136,5 @@ reports/
 .vscode/
 .idea/
 .deep-venv/
+
+.omo/

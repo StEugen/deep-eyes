@@ -96,7 +96,24 @@ class HTTPClient:
         # Proxy rotation
         self.proxy_pool = advanced_config.get('proxy_pool', [])
         self.proxy_index = 0
-        self.session = requests.Session()
+
+        tls_cfg = self.config.get('tls_evasion', {})
+        self.session = None
+        if tls_cfg.get('enabled', False):
+            try:
+                from curl_cffi import requests as curl_requests
+                impersonate = tls_cfg.get('impersonate', 'chrome120')
+                self.session = curl_requests.Session(impersonate=impersonate)
+                logger.info(f"TLS evasion enabled (curl_cffi impersonate={impersonate})")
+            except ImportError:
+                logger.warning(
+                    "tls_evasion.enabled but curl_cffi not installed; "
+                    "pip install curl_cffi — falling back to requests"
+                )
+            except Exception as e:
+                logger.warning(f"TLS evasion init failed: {e}")
+        if self.session is None:
+            self.session = requests.Session()
         
         # Configure retries
         retry_strategy = Retry(

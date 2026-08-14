@@ -53,11 +53,9 @@ pytest tests/ -v
 
 ### Code Formatting
 ```powershell
-# Format code
-black .
-
-# Check linting
-flake8 .
+# Lint / format (ruff preferred; black/flake8 optional if installed)
+ruff check .
+ruff format .
 ```
 
 ## Project Structure
@@ -69,7 +67,7 @@ deep-eye/
 ├── modules/           # Security testing modules
 ├── utils/             # Utility functions
 ├── config/            # Configuration files
-├── templates/         # Report templates
+├── templates/         # Nuclei-style YAML templates (+ report assets)
 ├── tests/             # Unit tests
 └── examples/          # Usage examples
 ```
@@ -77,21 +75,22 @@ deep-eye/
 ## Adding New Features
 
 ### Adding a New Vulnerability Check
-1. Create test module in `modules/exploits/`
-2. Implement detection logic
-3. Add to vulnerability scanner
-4. Update documentation
+1. Create package under `modules/<name>/` with `__init__.py` and tester class
+2. Constructor `(http_client, config)`, method `scan(url, context=None) -> List[Dict]`
+3. Wire in `core/vulnerability_scanner.py` or `ScannerEngine._init_extra_module_testers`
+4. Add name to `config/config.example.yaml` `vulnerability_scanner.enabled_checks`
+5. Update documentation
 
 ### Adding a New AI Provider
 1. Create provider class in `ai_providers/`
-2. Implement generate() method
-3. Add to provider manager
+2. Implement `generate(prompt, **kwargs) -> str`
+3. Register in `provider_manager._initialize_providers`
 4. Update configuration template
 
 ### Adding Report Formats
-1. Create template in `templates/`
-2. Implement generator in `report_generator.py`
-3. Add format option to CLI
+1. Create builder in `utils/exports/`
+2. Export from `utils/exports/__init__.py`
+3. Wire format in `report_generator.py` / CLI `--formats`
 4. Update documentation
 
 ## Security
@@ -119,7 +118,7 @@ deep-eye/
 ## Testing Guidelines
 
 - Write unit tests for new features
-- Maintain >80% code coverage
+- Prefer tests for new Hanzou-era modules; expand core coverage when touching core
 - Test edge cases
 - Mock external API calls
 

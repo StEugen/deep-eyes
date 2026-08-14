@@ -24,6 +24,7 @@ from modules.secrets_scanner.secrets_detector import SecretsDetector
 from utils.http_client import HTTPClient
 from utils.parser import URLParser, ResponseParser
 from utils.notification_manager import NotificationManager
+from utils.scope_manager import ScopeManager
 from utils.logger import get_logger
 
 console = Console()
@@ -65,7 +66,13 @@ class ScannerEngine:
             config=config,
             http_client=self.http_client
         )
-        
+        for _name, tester in getattr(self.vulnerability_scanner, "_feature_testers", []):
+            if hasattr(tester, "set_ai_manager"):
+                try:
+                    tester.set_ai_manager(ai_manager)
+                except Exception:
+                    pass
+
         self.ai_payload_generator = AIPayloadGenerator(
             ai_manager=ai_manager,
             config=config
@@ -98,7 +105,101 @@ class ScannerEngine:
             self.secrets_scanner = SecretsDetector(config)
             logger.info("Secrets scanner initialized")
 
-        # State tracking and management
+        self.scope_manager = ScopeManager(config)
+        self.oast_server = None
+        oast_cfg = config.get('oast', {})
+        if oast_cfg.get('enabled', False):
+            try:
+                from utils.oast_server import OASTCallbackServer
+                self.oast_server = OASTCallbackServer(
+                    host=oast_cfg.get('host', '0.0.0.0'),
+                    port=int(oast_cfg.get('port', 9999)),
+                )
+                self.oast_server.start()
+                if not config.get('scanner', {}).get('oast_callback_url'):
+                    self.ai_payload_generator.OAST_CALLBACK_URL = (
+                        self.oast_server.get_callback_url()
+                    )
+                logger.info("OAST callback server started")
+            except Exception as e:
+                logger.warning(f"OAST server failed to start: {e}")
+                self.oast_server = None
+
+        self.proxy_runner = None
+        proxy_cfg = config.get('intercepting_proxy', {})
+        if proxy_cfg.get('enabled', False):
+            try:
+                from modules.intercepting_proxy import ProxyRunner
+                self.proxy_runner = ProxyRunner(config)
+                if self.proxy_runner.start():
+                    proxies = self.proxy_runner.proxies_dict()
+                    if proxies and hasattr(self.http_client, 'session'):
+                        self.http_client.session.proxies.update(proxies)
+                    logger.info("Intercepting proxy started")
+                elif proxy_cfg.get('required', False):
+                    raise RuntimeError("intercepting_proxy.required but mitmweb failed to start")
+            except Exception as e:
+                logger.warning(f"Intercepting proxy init failed: {e}")
+                if proxy_cfg.get('required', False):
+                    raise
+
+        self.challenge_solver = None
+        if config.get('challenge_solver', {}).get('enabled', False):
+            try:
+                from modules.challenge_solver import ChallengeSolver
+                self.challenge_solver = ChallengeSolver(self.http_client, config)
+            except Exception as e:
+                logger.warning(f"Challenge solver init failed: {e}")
+
+        self.login_player = None
+        self._login_macro_path = None
+        if config.get('login_replay', {}).get('enabled', False):
+            try:
+                from modules.login_replay import LoginPlayer
+                self.login_player = LoginPlayer(self.http_client, config)
+                self._login_macro_path = config.get('login_replay', {}).get(
+                    'macro_path', 'config/login_macro.json'
+                )
+            except Exception as e:
+                logger.warning(f"Login replay init failed: {e}")
+
+        self.captcha_detector = None
+        if config.get('captcha', {}).get('enabled', False):
+            try:
+                from modules.captcha_detection import CaptchaDetector
+                self.captcha_detector = CaptchaDetector(config)
+            except Exception as e:
+                logger.warning(f"CAPTCHA detector init failed: {e}")
+
+        self.template_executor = None
+        self._loaded_templates = []
+        tpl_cfg = config.get('templates', {})
+        if tpl_cfg.get('enabled', False):
+            try:
+                from modules.template_engine import TemplateExecutor, load_templates
+                self.template_executor = TemplateExecutor(self.http_client, config)
+                self._loaded_templates = load_templates(
+                    tpl_cfg.get('template_directories', ['templates']),
+                    tag_filters=tpl_cfg.get('tag_filters') or None,
+                    severity_filter=tpl_cfg.get('severity_filter') or None,
+                )
+                logger.info(f"Loaded {len(self._loaded_templates)} YAML templates")
+            except Exception as e:
+                logger.warning(f"Template engine init failed: {e}")
+
+        self._extra_module_testers = self._init_extra_module_testers()
+
+        self.auth_session = None
+        if config.get('auth_session', {}).get('enabled', False):
+            try:
+                from modules.auth_session import AuthSessionStore
+                self.auth_session = AuthSessionStore(self.http_client, config)
+                role = config.get('auth_session', {}).get('default_role')
+                if role:
+                    self.auth_session.apply_role(role)
+            except Exception as e:
+                logger.warning(f"Auth session init failed: {e}")
+
         self.state_manager = PentestStateManager(target_url)
         self.visited_urls: Set[str] = set()
         self.urls_to_scan: List[str] = [target_url]
@@ -120,21 +221,65 @@ class ScannerEngine:
         experimental_config = config.get('experimental', {})
         if experimental_config.get('enable_cve_matching', False):
             try:
-                from modules.cve_intelligence.cve_matcher import CVEMatcher
-                from pathlib import Path
-                db_path = Path(experimental_config.get('cve_database_path', 'data/cve_intelligence.db'))
-                if db_path.exists():
-                    self.cve_matcher = CVEMatcher(str(db_path))
-                    logger.info("CVE matcher initialized for vulnerability enrichment")
+                from modules.cve_intelligence.cve_matcher import get_cve_matcher
+                self.cve_matcher = get_cve_matcher(config, auto_seed=True)
+                if self.cve_matcher:
+                    logger.info(
+                        "CVE matcher initialized for vulnerability enrichment "
+                        f"({self.cve_matcher.db_path})"
+                    )
                 else:
-                    logger.info("CVE database not found. Run: python scripts/update_cve_database.py")
+                    logger.warning(
+                        "CVE matching enabled but database unavailable. "
+                        "Run: python scripts/update_cve_database.py "
+                        "or rely on built-in seed via get_cve_matcher()"
+                    )
             except Exception as e:
-                logger.debug(f"CVE matcher initialization failed: {e}")
+                logger.warning(f"CVE matcher initialization failed: {e}")
         
         # Statistics
         self.start_time = None
         self.end_time = None
-        
+
+    def _init_extra_module_testers(self) -> Dict:
+        checks = set(
+            self.config.get('vulnerability_scanner', {}).get('enabled_checks', [])
+        )
+        testers = {}
+        mapping = {
+            'directory_bruteforce': (
+                'modules.directory_bruteforce.dirb_scanner',
+                'DirectoryBruteforcer',
+            ),
+            'port_scanner': (
+                'modules.port_scanner.scanner',
+                'PortScanner',
+            ),
+            'saml_attacks': (
+                'modules.saml_attacks.saml_tester',
+                'SAMLTester',
+            ),
+            'subdomain_takeover': (
+                'modules.subdomain_takeover.takeover_tester',
+                'SubdomainTakeoverTester',
+            ),
+            'cache_poisoning': (
+                'modules.cache_poisoning.cache_tester',
+                'CachePoisoningTester',
+            ),
+        }
+        for check_name, (mod_path, cls_name) in mapping.items():
+            if check_name not in checks:
+                continue
+            try:
+                import importlib
+                mod = importlib.import_module(mod_path)
+                cls = getattr(mod, cls_name)
+                testers[check_name] = cls(self.http_client, self.config)
+            except Exception as e:
+                logger.warning(f"Extra module {check_name} init failed: {e}")
+        return testers
+
     def _should_include_url(self, url: str) -> bool:
         """
         Check if URL should be included based on advanced filtering rules.
@@ -165,6 +310,10 @@ class ScannerEngine:
                         return False
                 except re.error as e:
                     logger.warning(f"Invalid regex pattern '{pattern}': {e}")
+
+        if hasattr(self, 'scope_manager') and not self.scope_manager.is_in_scope(url):
+            logger.debug(f"Excluding URL out of scope: {url}")
+            return False
 
         return True
 
@@ -287,11 +436,72 @@ class ScannerEngine:
                 'response': response,
                 'headers': dict(response.headers)
             }
+            try:
+                parser = ResponseParser(response)
+                context['forms'] = parser.extract_forms()
+                cookies = {}
+                if hasattr(self.http_client, 'session'):
+                    try:
+                        cookies = dict(self.http_client.session.cookies)
+                    except Exception:
+                        cookies = {}
+                context['cookies'] = cookies
+            except Exception as e:
+                logger.debug(f"Form extract failed: {e}")
+                context['forms'] = []
+
+            oapi_params = (getattr(self, "_openapi_param_map", {}) or {}).get(url) or []
+            if oapi_params:
+                json_names, query_names = [], []
+                for p in oapi_params:
+                    if not isinstance(p, dict):
+                        continue
+                    name, loc = p.get("name"), (p.get("in") or "").lower()
+                    if not name:
+                        continue
+                    if loc == "body":
+                        json_names.append(name)
+                    elif loc == "query":
+                        query_names.append(name)
+                    elif loc == "header":
+                        context.setdefault("injectable_headers", []).append(name)
+                if json_names:
+                    context["json_params"] = list(dict.fromkeys(
+                        (context.get("json_params") or []) + json_names
+                    ))
+                if query_names:
+                    context["query_params"] = list(dict.fromkeys(
+                        (context.get("query_params") or []) + query_names
+                    ))
+                    if "?" not in url:
+                        from urllib.parse import urlencode
+                        context["openapi_query_stub"] = urlencode(
+                            {n: "1" for n in query_names[:5]}
+                        )
             
             # Add OSINT data to context if available from reconnaissance
             if recon_data and 'osint' in recon_data:
                 context['osint_data'] = recon_data['osint']
-            
+
+            if self.challenge_solver:
+                try:
+                    self.challenge_solver.solve(url)
+                except Exception as e:
+                    logger.debug(f"Challenge solve skip for {url}: {e}")
+
+            if self.captcha_detector and self.config.get('captcha', {}).get(
+                'skip_protected', True
+            ):
+                try:
+                    body = getattr(response, 'text', '') or ''
+                    hit = self.captcha_detector.detect(body, url)
+                    if hit:
+                        logger.info(f"CAPTCHA protected, skip vuln scan: {url}")
+                        self.state_manager.update_urls(tested=1)
+                        return vulnerabilities
+                except Exception as e:
+                    logger.debug(f"CAPTCHA detect failed: {e}")
+
             # Generate intelligent payloads
             payloads = self.ai_payload_generator.generate_payloads(context)
             
@@ -324,6 +534,28 @@ class ScannerEngine:
                 plugin_results = self.plugin_manager.scan_with_plugins(url, context)
                 vulnerabilities.extend(plugin_results)
 
+            if self.template_executor and self._loaded_templates:
+                try:
+                    for tpl in self._loaded_templates:
+                        vulnerabilities.extend(
+                            self.template_executor.run(tpl, url)
+                        )
+                except Exception as e:
+                    logger.error(f"Template scan failed for {url}: {e}")
+
+            for check_name, tester in getattr(self, '_extra_module_testers', {}).items():
+                try:
+                    if self.state_manager:
+                        self.state_manager.start_attack(check_name, url)
+                    found = tester.scan(url, context)
+                    vulnerabilities.extend(found or [])
+                    if self.state_manager:
+                        self.state_manager.end_attack(
+                            bool(found), f"Found {len(found or [])} {check_name}"
+                        )
+                except Exception as e:
+                    logger.error(f"Extra module {check_name} failed on {url}: {e}")
+
             # Scan for secrets and credentials
             if self.secrets_scanner:
                 try:
@@ -337,11 +569,17 @@ class ScannerEngine:
                                 'type': f'Secret Exposure - {secret["type"]}',
                                 'severity': secret['severity'],
                                 'url': secret['url'],
+                                'parameter': secret.get('location', ''),
                                 'location': secret['location'],
                                 'evidence': secret['masked_value'],
                                 'context': secret.get('context', ''),
                                 'description': f'Potentially leaked {secret["type"]} detected',
-                                'recommendation': 'Immediately rotate the exposed credential. Remove sensitive data from client-side code. Use environment variables for secrets.'
+                                'remediation': (
+                                    secret.get('remediation')
+                                    or 'Immediately rotate the exposed credential. '
+                                    'Remove sensitive data from client-side code. '
+                                    'Use environment variables for secrets.'
+                                ),
                             }
                             vulnerabilities.append(secret_vuln)
                 except Exception as e:
@@ -462,7 +700,22 @@ class ScannerEngine:
         """
         self.start_time = datetime.now()
         self.state_manager.set_phase(PentestPhase.INITIALIZATION)
-        
+
+        if self.login_player and self._login_macro_path:
+            try:
+                from modules.login_replay import load_macro
+                macro = load_macro(self._login_macro_path)
+                ok = self.login_player.play(macro)
+                if not ok and self.config.get('login_replay', {}).get('abort_on_fail', True):
+                    raise RuntimeError(
+                        f"Login replay failed for macro {self._login_macro_path}"
+                    )
+                logger.info("Login replay completed")
+            except Exception as e:
+                if self.config.get('login_replay', {}).get('abort_on_fail', True):
+                    raise
+                logger.warning(f"Login replay failed (continuing): {e}")
+
         results = {
             'target': self.target_url,
             'start_time': self.start_time.isoformat(),
@@ -504,8 +757,83 @@ class ScannerEngine:
 
                     self.vulnerabilities.append(vuln)
         
+        mobile_cfg = self.config.get("mobile") or {}
+        if mobile_cfg.get("enabled", False):
+            try:
+                mobile_ctx = {
+                    "platform": mobile_cfg.get("platform", "android"),
+                    "package": mobile_cfg.get("package") or mobile_cfg.get("bundle_id") or "",
+                    "artifact": mobile_cfg.get("artifact") or mobile_cfg.get("apk_path") or mobile_cfg.get("ipa_path") or "",
+                    "ai_manager": self.ai_manager,
+                }
+                mobile_findings = []
+                for check_name, tester in getattr(self.vulnerability_scanner, "_feature_testers", []):
+                    if check_name not in (
+                        "frida_mobile",
+                        "android_static",
+                        "ios_plist",
+                        "mobile_ssl_pinning",
+                        "mobile_ai_chain",
+                    ):
+                        continue
+                    if check_name not in self.config.get("vulnerability_scanner", {}).get("enabled_checks", []):
+                        continue
+                    try:
+                        if check_name == "mobile_ai_chain":
+                            mobile_ctx["mobile_findings"] = list(mobile_findings)
+                        found = tester.scan(self.target_url, mobile_ctx) or []
+                        for f in found:
+                            f.setdefault("source", "mobile")
+                        mobile_findings.extend(found)
+                        self.vulnerabilities.extend(found)
+                    except Exception as e:
+                        logger.warning(f"Mobile module {check_name} failed: {e}")
+                results["mobile_findings"] = len(mobile_findings)
+                logger.info(f"Mobile analysis produced {len(mobile_findings)} findings")
+            except Exception as e:
+                logger.warning(f"Mobile phase failed: {e}")
+
         # Phase 2: Web Crawling
         discovered_urls = self.crawl_recursive()
+
+        openapi_cfg = self.config.get('openapi', {})
+        self._openapi_param_map = getattr(self, "_openapi_param_map", {}) or {}
+        if openapi_cfg.get('enabled', False) and openapi_cfg.get('source'):
+            try:
+                from modules.openapi_ingest import load_openapi, expand_endpoints
+                spec = load_openapi(openapi_cfg['source'], self.http_client)
+                eps = expand_endpoints(spec, base_url=self.target_url)
+                for ep in eps:
+                    u = ep.get('url')
+                    if u and self._should_include_url(u):
+                        discovered_urls.add(u)
+                        params = ep.get("parameters") or []
+                        if params:
+                            self._openapi_param_map[u] = params
+                results['openapi_endpoints'] = len(eps)
+                logger.info(f"OpenAPI seeded {len(eps)} endpoints")
+            except Exception as e:
+                logger.warning(f"OpenAPI ingest failed: {e}")
+
+        plan = None
+        if self.config.get('ai_planner', {}).get('enabled', False):
+            try:
+                from modules.ai_planner import AIAttackPlanner
+                planner = AIAttackPlanner(self.ai_manager, self.config)
+                plan = planner.plan(
+                    recon_data=recon_data,
+                    enabled_checks=self.config.get('vulnerability_scanner', {}).get(
+                        'enabled_checks', []
+                    ),
+                )
+                results['attack_plan'] = plan
+                if plan.get('threads'):
+                    self.threads = int(plan['threads'])
+                if plan.get('max_urls') and len(discovered_urls) > plan['max_urls']:
+                    discovered_urls = set(list(discovered_urls)[: int(plan['max_urls'])])
+            except Exception as e:
+                logger.warning(f"AI planner failed: {e}")
+
         results['urls_crawled'] = len(discovered_urls)
         results['discovered_urls'] = list(discovered_urls)
         
@@ -519,6 +847,33 @@ class ScannerEngine:
         # Compile results
         results['vulnerabilities'] = self.vulnerabilities
         results['severity_summary'] = self._calculate_severity_summary()
+
+        try:
+            from utils.finding_fingerprint import dedupe_findings
+            if self.config.get('reporting', {}).get('dedupe', True):
+                self.vulnerabilities = dedupe_findings(self.vulnerabilities)
+                results['vulnerabilities'] = self.vulnerabilities
+                results['severity_summary'] = self._calculate_severity_summary()
+        except Exception as e:
+            logger.debug(f"Dedupe skipped: {e}")
+
+        try:
+            from modules.fp_replay import FPReplay
+            fpr = FPReplay(self.http_client, self.config)
+            if fpr.is_enabled():
+                self.vulnerabilities = fpr.replay(self.vulnerabilities)
+                results['vulnerabilities'] = self.vulnerabilities
+        except Exception as e:
+            logger.debug(f"FP replay skipped: {e}")
+
+        try:
+            from modules.evidence_summary import EvidenceSummarizer
+            es = EvidenceSummarizer(self.ai_manager, self.config)
+            if es.is_enabled():
+                self.vulnerabilities = es.enrich(self.vulnerabilities)
+                results['vulnerabilities'] = self.vulnerabilities
+        except Exception as e:
+            logger.debug(f"Evidence summary skipped: {e}")
 
         # RAG enrichment (Group F) — auto-link findings to similar CVEs
         rag_config = self.config.get('rag', {})
@@ -543,7 +898,10 @@ class ScannerEngine:
                             f"{vuln.get('type', '')} {vuln.get('parameter', '')} "
                             f"{str(vuln.get('evidence', ''))[:200]}"
                         )
-                        hits = rag.search(query, top_k=3)
+                        hits = rag.search(
+                            query,
+                            top_k=int(rag_config.get('top_k', 3)),
+                        )
                         if hits and not vuln.get('cve_references'):
                             vuln['cve_references'] = [h['cve_id'] for h in hits]
                             vuln['rag_matched'] = True
@@ -601,7 +959,28 @@ class ScannerEngine:
             logger.error(f"Error sending notification: {e}")
         
         self.state_manager.set_phase(PentestPhase.COMPLETED)
-        
+
+        if self.oast_server:
+            try:
+                results['oast_callbacks'] = self.oast_server.get_callbacks()
+                self.oast_server.stop()
+            except Exception as e:
+                logger.debug(f"OAST shutdown: {e}")
+        if self.proxy_runner:
+            try:
+                self.proxy_runner.stop()
+            except Exception as e:
+                logger.debug(f"Proxy shutdown: {e}")
+
+        try:
+            self.state_manager.save_checkpoint(
+                urls_discovered=set(results.get('discovered_urls', [])),
+                urls_scanned=set(self.visited_urls),
+                vulnerabilities=self.vulnerabilities,
+            )
+        except Exception as e:
+            logger.debug(f"Checkpoint save skipped: {e}")
+
         return results
     
     def _calculate_severity_summary(self) -> Dict[str, int]:

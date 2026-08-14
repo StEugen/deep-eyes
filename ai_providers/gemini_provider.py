@@ -56,27 +56,19 @@ class GeminiProvider:
             logger.error(f"Failed to initialize Gemini client: {e}")
             self.client = None
     
-    def generate(self, prompt: str, max_tokens: Optional[int] = None) -> str:
-        """
-        Generate response from Gemini.
-        
-        Args:
-            prompt: Input prompt
-            max_tokens: Maximum tokens to generate (optional)
-            
-        Returns:
-            Generated text response
-        """
+    def generate(self, prompt: str, **kwargs) -> str:
         if not self.client:
             raise RuntimeError("Gemini client not initialized. Check API key and installation.")
-        
+
+        max_tokens = kwargs.get('max_tokens', self.max_tokens)
+        temperature = kwargs.get('temperature', self.temperature)
+
         try:
-            # Generate content
             response = self.client.generate_content(
                 prompt,
                 generation_config={
-                    'temperature': self.temperature,
-                    'max_output_tokens': max_tokens or self.max_tokens,
+                    'temperature': temperature,
+                    'max_output_tokens': max_tokens,
                 }
             )
             
