@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/Screenshot 2025-10-20 150312.png" height="300">
+  <img src="./assets/logo.png" height="300">
 </p>
 
 <h1 align="center">Deep Eye</h1>
@@ -26,10 +26,12 @@ Deep Eye orchestrates multiple AI providers (OpenAI, Claude, Grok, Gemini, OLLAM
 - **OpenAPI Ingest** — Seed crawl from OpenAPI/Swagger specs
 - **Context-Aware Payloads** — WAF fingerprint, tech stack, CVE-aware generation
 - **CVE Intelligence** — RAG-indexed CVE DB (NVD/MITRE/Exploit-DB patterns)
-- **AI Triage & Evidence** — FP filtering, bounty reports, per-finding evidence summaries, FP replay
+- **AI Triage & Evidence** — FP filtering, per-finding evidence summaries, FP replay
+- **Bug Bounty Report Writer** — Auto-generates HackerOne-style Markdown reports per vulnerability
 - **AI Attack Planner** — Optional post-recon check order / budget
 - **Nuclei-Style Templates** — YAML matchers/extractors under `templates/`
-- **Auth Helpers** — Login macro replay, multi-role session store, challenge solver, CAPTCHA skip
+- **Auth Helpers** — Login macro replay, multi-role session store
+- **CAPTCHA Detection** — reCAPTCHA, hCaptcha, Cloudflare Turnstile, Arkose; challenge solver + skip
 - **Browser Automation** — Playwright (+ optional Browser Use AI)
 - **Intercepting Proxy** — mitmproxy/mitmweb integration
 - **Compliance Mapping** — PCI-DSS v4, SOC2 CC, ISO 27001:2022
@@ -128,6 +130,8 @@ python deep_eye.py -u https://target.com --retest-new baseline.json
 | `--diff-format` | `html`, `json`, or `csv` |
 | `--retest-new` | After scan, keep only findings new vs baseline JSON |
 | `--scope-nl` | Natural-language scope string |
+| `--setup` | Run interactive config setup wizard and exit |
+| `--setup-force` | With `--setup`, overwrite existing config without extra prompt |
 
 ## Configuration
 
@@ -208,8 +212,10 @@ deep-eye/
 ├── templates/            # Nuclei-style YAML templates
 ├── plugins/              # Custom PluginBase plugins
 ├── .agents/skills/       # Agent skills (pentest, bounty, red/blue, ctf)
+├── proxy/                # Skill discovery loader
 ├── scripts/              # CVE DB + RAG builders
 ├── tests/                # pytest suite
+├── data/                 # SQLite + auth_sessions + RAG index
 └── docs/                 # Full documentation
 ```
 
