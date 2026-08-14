@@ -127,6 +127,33 @@ Note: All scan options are configured in config.yaml
         help='Diff report format (default: html)'
     )
 
+    parser.add_argument(
+        '--retest-new',
+        type=str,
+        default=None,
+        metavar='BASELINE_JSON',
+        help='After scan, only keep findings that are NEW vs baseline scan JSON'
+    )
+
+    parser.add_argument(
+        '--scope-nl',
+        type=str,
+        default=None,
+        help='Natural-language scope, e.g. "only /api/* no /logout host target.com"'
+    )
+
+    parser.add_argument(
+        '--setup',
+        action='store_true',
+        help='Run interactive config setup wizard and exit'
+    )
+
+    parser.add_argument(
+        '--setup-force',
+        action='store_true',
+        help='With --setup, overwrite existing config without extra prompt default'
+    )
+
     return parser.parse_args()
 
 
@@ -222,6 +249,11 @@ def main():
         if args.diff:
             return _run_diff_mode(args)
 
+        if getattr(args, "setup", False) or getattr(args, "setup_force", False):
+            from utils.onboard import run_onboard
+            run_onboard(str(Path(args.config)), force=bool(getattr(args, "setup_force", False)))
+            return 0
+
         # Load configuration (run onboard wizard if config missing)
         config_path = Path(args.config)
         if not config_path.exists():
@@ -230,6 +262,11 @@ def main():
         else:
             console.print("[bold blue]Loading configuration...[/bold blue]")
             config = ConfigLoader.load(args.config)
+
+        if getattr(args, 'scope_nl', None):
+            from utils.nl_scope import apply_nl_scope_to_config
+            config = apply_nl_scope_to_config(config, args.scope_nl)
+            console.print(f"[dim]NL scope applied: {args.scope_nl}[/dim]")
         
         # Get scanner config
         scanner_config = config.get('scanner', {})
@@ -308,6 +345,28 @@ def main():
             quick_scan=quick_scan,
             scan_subdomains=scan_subdomains
         )
+
+        if getattr(args, 'retest_new', None):
+            try:
+                from core.scan_diff import load_scan_json, _identity_no_sev
+                baseline = load_scan_json(args.retest_new)
+                base_keys = {
+                    _identity_no_sev(v)
+                    for v in baseline.get('vulnerabilities', [])
+                    if v.get('type') and v.get('url')
+                }
+                before = len(results.get('vulnerabilities', []))
+                results['vulnerabilities'] = [
+                    v for v in results.get('vulnerabilities', [])
+                    if _identity_no_sev(v) not in base_keys
+                ]
+                console.print(
+                    f"[cyan]Retest-new:[/cyan] kept "
+                    f"{len(results['vulnerabilities'])}/{before} new findings "
+                    f"vs {args.retest_new}"
+                )
+            except Exception as e:
+                console.print(f"[yellow]Retest-new skipped:[/yellow] {e}")
         
         # Generate report (from config)
         reporting_config = config.get('reporting', {})

@@ -1,183 +1,113 @@
 # Scan Flow
 
-This document describes the complete execution flow when Deep Eye runs a scan.
-
-## Entry Point
+## Entry
 
 ```bash
-python deep_eye.py -u https://target.com
+python deep_eye.py -u https://target.com [--scope-nl "..."] [--retest-new baseline.json]
 ```
 
-`deep_eye.py:main()` handles:
-1. Argument parsing
-2. Config loading (or onboard wizard if config missing)
-3. Validation
-4. `ScannerEngine` initialization
-5. `scan()` invocation
-6. Report generation
+`deep_eye.py:main()`:
 
-## Phase Diagram
+1. Parse args  
+2. Load config (or onboard wizard)  
+3. Apply `--scope-nl` if set  
+4. Build `AIProviderManager` + `ScannerEngine`  
+5. `scanner.scan(...)`  
+6. Optional `--retest-new` filter on results  
+7. `ReportGenerator` for each format  
+8. Notifications (if enabled)
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        INITIALIZATION                            │
-│  PentestStateManager setup, HTTPClient init, module loading      │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       RECONNAISSANCE                             │
-│  ReconEngine: DNS, WHOIS, OSINT, tech detection, SSL analysis   │
-│  (skipped if enable_recon: false)                                │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    SUBDOMAIN DISCOVERY                            │
-│  SubdomainScanner: CT logs, DNS bruteforce, liveness checks     │
-│  (experimental, config-gated)                                    │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         CRAWLING                                  │
-│  ThreadPoolExecutor BFS crawl                                    │
-│  URL deduplication, extension/pattern filtering, scope checks    │
-│  Discovers all scannable URLs up to configured depth             │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   VULNERABILITY SCANNING                          │
-│  Per-URL parallel scan (ThreadPoolExecutor):                     │
-│                                                                   │
-│  For each URL:                                                   │
-│  1. HTTP GET response                                            │
-│  2. AIPayloadGenerator.generate_payloads(context)                │
-│  3. VulnerabilityScanner.scan() - 45+ checks                    │
-│  4. SmartBrowserTester (if JS rendering enabled)                 │
-│  5. PluginManager.run_plugins()                                  │
-│  6. SecretsDetector.scan_response()                              │
-│  7. CVEMatcher.enrich_vulnerability() per finding                │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   POST-SCAN ENRICHMENT                            │
-│                                                                   │
-│  1. CVERagIndex.search() - semantic CVE matching per finding     │
-│  2. ComplianceMapper.enrich_vulnerabilities()                    │
-│     PCI-DSS, SOC2, ISO 27001 control mapping                    │
-│  3. AITriage.triage_vulnerabilities()                            │
-│     LLM scores each finding, drops false positives              │
-│  4. BountyWriter.generate_reports()                              │
-│     Per-vuln Markdown bug bounty reports                         │
-│                                                                   │
-│  (Each step config-gated, operates in-place on results list)     │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         REPORTING                                 │
-│  ReportGenerator.generate(results, path, format)                 │
-│  Formats: HTML, PDF, JSON, SARIF, JUnit XML, CSV, XLSX          │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       NOTIFICATIONS                               │
-│  NotificationManager: Email, Slack, Discord                      │
-│  Triggered on scan completion or critical findings               │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## Payload Generation Flow
+## Phase diagram
 
 ```
-URL + Response Context
-        |
-        v
-Context Analysis (tech stack, WAF, DB fingerprint)
-        |
-        v
-AI Provider generate(prompt) --> Generated Payloads
-        |                              |
-        v                              v
-CVE-based payloads            Obfuscated variants
+INITIALIZATION
+  HTTPClient, modules, plugins, OAST?, proxy?, templates?, auth_session?
+       │
+       ▼
+LOGIN REPLAY (optional) ── login_replay.enabled + macro
+       │
+       ▼
+RECONNAISSANCE (optional) ── enable_recon / ReconEngine
+       │
+       ▼
+SUBDOMAIN DISCOVERY (optional) ── experimental.enable_subdomain_scanning
+       │
+       ▼
+CRAWLING ── ThreadPoolExecutor BFS
+  + OpenAPI seed (openapi.enabled → expand endpoints into URL set)
+  + AI planner (ai_planner.enabled → threads / max_urls / check order hint)
+       │
+       ▼
+VULNERABILITY SCANNING (per URL, parallel)
+  1. Scope / filter skip
+  2. GET response
+  3. challenge_solver.solve? 
+  4. captcha detect → skip if protected
+  5. AIPayloadGenerator.generate_payloads
+  6. VulnerabilityScanner.scan
+       - built-in _check_*
+       - classic modules (api, auth, …)
+       - _feature_testers (cors_csp, jwt_deep, idor, …)
+  7. Browser automation (advanced.enable_javascript_rendering)
+  8. Plugins
+  9. YAML templates (templates.enabled)
+ 10. Extra modules (directory_bruteforce, port_scanner, …)
+ 11. SecretsDetector (+ SecretScanner content)
+ 12. CVEMatcher enrich (experimental)
+       │
+       ▼
+POST-SCAN
+  1. Dedupe (reporting.dedupe / finding_fingerprint)
+  2. FP replay (fp_replay.enabled)
+  3. Evidence summary (evidence_summary.enabled)
+  4. RAG CVE link (rag.enabled)
+  5. Compliance frameworks (compliance.enabled)
+  6. AI triage + bounty writer (ai_triage / bug_bounty)
+       │
+       ▼
+REPORTING + NOTIFICATIONS + checkpoint save
 ```
 
-Context-aware generation considers:
-- **Technology**: PHP, ASP.NET, Node.js, Java specific payloads
-- **Database**: MySQL vs PostgreSQL vs MSSQL vs Oracle syntax
-- **WAF**: Cloudflare/Sucuri/Akamai encoding bypass techniques
-- **CVE database**: Real exploit patterns from NVD when enabled
-
-## Challenge Solving Flow
-
-When a target is behind Cloudflare/Akamai:
-
-```
-HTTP Request --> Response
-        |
-        v
-ChallengeDetector.detect(html, headers)
-        |
-        +-- No challenge --> proceed normally
-        |
-        +-- Challenge detected
-                |
-                v
-        ChallengeSolver.solve(url)
-                |
-                +-- Cache hit (within TTL) --> inject cached cookies
-                |
-                +-- Cache miss --> launch headless Chromium
-                        --> wait for JS challenge
-                        --> extract clearance cookies
-                        --> inject into HTTPClient
-                        --> cache with TTL
-```
-
-## Scan Diff Flow (--diff mode)
+## Diff-only mode
 
 ```bash
 python deep_eye.py --diff baseline.json current.json --diff-format html
 ```
 
+Skips scan; uses `core/scan_diff.py` + `utils/exports/diff_renderer.py`.
+
+## Retest-new mode
+
+After a normal scan, `--retest-new baseline.json` keeps only findings whose identity `(type, url, parameter)` is not in the baseline. Useful for CI “what’s new since last run”.
+
+## Result shape
+
+Each finding is a dict:
+
+```python
+{
+  "type": str,
+  "severity": "critical|high|medium|low|info",
+  "url": str,
+  "parameter": str,      # optional
+  "payload": str,        # optional
+  "evidence": str,
+  "remediation": str,
+  "fingerprint": str,    # optional, set by dedupe
+  "cve_references": [],  # optional
+  "ai_evidence_summary": str,  # optional
+  "false_positive": bool,      # optional (triage)
+}
 ```
-Load baseline.json + current.json
-        |
-        v
-diff_scans(baseline, current)
-        |
-        +-- Normalize URLs (lowercase, sort params)
-        +-- Build identity tuples (type, url, param, severity)
-        +-- Set operations: new, fixed, unchanged
-        +-- Detect severity changes
-        |
-        v
-Render output (HTML/JSON/CSV)
-```
 
-## Threading Model
+## Threading
 
-- **Crawl Phase**: `ThreadPoolExecutor(max_workers=threads)` — each worker fetches URL, extracts links, queues new URLs
-- **Scan Phase**: `ThreadPoolExecutor(max_workers=threads)` — each worker runs all checks on one URL
-- **Subdomain Phase**: `ThreadPoolExecutor` — parallel liveness verification and scanning
+- Crawl: `ThreadPoolExecutor(max_workers=min(threads, 10))`
+- Scan: `ThreadPoolExecutor(max_workers=threads)` (1–50)
+- Shared `HTTPClient` + lock on `vulnerabilities` list
 
-Thread count: 1-50 via `scanner.default_threads`. Higher = faster but more aggressive.
+## Related docs
 
-## State Tracking
-
-`PentestStateManager` tracks throughout:
-
-| Metric | Description |
-|--------|-------------|
-| Current phase | INIT, RECON, CRAWL, SCAN, REPORT, COMPLETE |
-| URLs discovered | Total unique URLs found during crawl |
-| URLs scanned | URLs that completed vulnerability testing |
-| Vulns by severity | Running count: critical/high/medium/low/info |
-| Attack stats | Per-attack-type success/failure/total counts |
-| Time per phase | Elapsed seconds in each phase |
-
-State displayed in CLI via Rich tables when verbose mode enabled.
+- [ARCHITECTURE.md](ARCHITECTURE.md)  
+- [CONFIGURATION.md](CONFIGURATION.md)  
+- [MODULES.md](MODULES.md)  

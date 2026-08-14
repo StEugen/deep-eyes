@@ -100,6 +100,7 @@ class ResponseParser:
             form_data = {
                 'action': form.get('action', ''),
                 'method': form.get('method', 'get').upper(),
+                'enctype': form.get('enctype', '') or form.get('encoding', '') or '',
                 'inputs': []
             }
             

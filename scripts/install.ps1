@@ -30,19 +30,19 @@ if ($versionMatch.Success) {
 
 # Create virtual environment (optional but recommended)
 Write-Host ""
-Write-Host "[*] Creating virtual environment..." -ForegroundColor Yellow
-if (Test-Path "..\venv") {
+Write-Host "[*] Creating virtual environment (.deep-venv)..." -ForegroundColor Yellow
+if (Test-Path "..\.deep-venv") {
     Write-Host "[*] Virtual environment already exists. Skipping..." -ForegroundColor Yellow
 } else {
     Set-Location ..
-    python -m venv venv
+    python -m venv .deep-venv
     Set-Location scripts
     Write-Host "[+] Virtual environment created" -ForegroundColor Green
 }
 
 # Activate virtual environment
 Write-Host "[*] Activating virtual environment..." -ForegroundColor Yellow
-..\venv\Scripts\Activate.ps1
+& ..\.deep-venv\Scripts\Activate.ps1
 
 # Upgrade pip
 Write-Host ""
@@ -96,7 +96,7 @@ Write-Host "====================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow
 Write-Host "1. Edit config\config.yaml and add your AI provider API keys" -ForegroundColor White
-Write-Host "2. Activate virtual environment: .\venv\Scripts\Activate.ps1" -ForegroundColor White
+Write-Host "2. Activate virtual environment: .\.deep-venv\Scripts\Activate.ps1" -ForegroundColor White
 Write-Host "3. Run Deep Eye: python deep_eye.py -u https://example.com" -ForegroundColor White
 Write-Host ""
 Write-Host "For help: python deep_eye.py --help" -ForegroundColor White

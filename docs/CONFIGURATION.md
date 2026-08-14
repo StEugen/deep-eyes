@@ -1,486 +1,247 @@
 # Configuration Reference
 
-All Deep Eye behavior is controlled via `config/config.yaml`. The CLI is intentionally minimal.
+All scan behavior is controlled by **`config/config.yaml`**.  
+Copy from **`config/config.example.yaml`** (source of truth for keys).
 
-## First-Time Setup
-
-If no config file exists, Deep Eye runs an interactive setup wizard on first launch:
-
-```bash
-python deep_eye.py -u https://target.com
-# Wizard prompts: provider, API key, model, threads, depth, scan mode, report format
-# Writes config/config.yaml automatically
-```
-
-Or copy the example manually:
 ```bash
 cp config/config.example.yaml config/config.yaml
 ```
 
-## Configuration Sections
+CLI only overrides a few things: target URL, config path, verbose, formats, diff, retest-new, NL scope.
 
-### ai_providers
+---
 
-Configure one or more AI providers. Deep Eye uses the provider specified in `scanner.ai_provider`.
+## First-time setup
 
-```yaml
-ai_providers:
-  openai:
-    enabled: true
-    api_key: "sk-..."
-    model: "gpt-4o"
-    temperature: 0.7
-    max_tokens: 2000
-    timeout: 30
+Missing config → interactive wizard (`utils/onboard.py`) writes `config.yaml`.
 
-  claude:
-    enabled: true
-    api_key: "sk-ant-..."
-    model: "claude-3-5-sonnet-20241022"
-    temperature: 0.7
-    max_tokens: 2000
-    timeout: 30
+Env substitution in YAML: `${VAR}` and `${VAR:-default}` (`utils/config_loader.py`).
 
-  ollama:
-    enabled: false
-    base_url: "http://localhost:11434"
-    model: "llama2"
-    timeout: 60
+---
 
-  openrouter:
-    enabled: false
-    api_key: "sk-or-..."
-    model: "openai/gpt-4o"
-    temperature: 0.7
-    max_tokens: 2000
-    timeout: 30
+## `ai_providers`
 
-  requesty:
-    enabled: false
-    api_key: "sk-..."          # Get a key at https://app.requesty.ai/api-keys
-    model: "openai/gpt-4o-mini"
-    temperature: 0.7
-    max_tokens: 2000
-    timeout: 30
-```
+Enable **one or more** providers. Active provider: `scanner.ai_provider`.
 
-Requesty (https://requesty.ai) is an OpenAI-compatible router. Deep Eye talks to it via
-`https://router.requesty.ai/v1` using your `REQUESTY_API_KEY`. Models use `provider/model`
-naming (e.g. `openai/gpt-4o-mini`).
+Supported: `openai`, `claude`, `grok`, `ollama`, `gemini`, `openrouter`, `mistral`, `groq`, `lmstudio`, `litellm`.
 
-Supported providers: `openai`, `claude`, `grok`, `ollama`, `gemini`, `openrouter`, `requesty`, `mistral`, `groq`, `lmstudio`, `litellm`
+Each block: `enabled`, `api_key` (if needed), `model`, `temperature`, `max_tokens`, `timeout`, optional `base_url`.
 
-### scanner
+Providers implement `generate(prompt, **kwargs) -> str`. Manager retries and failovers; empty responses are treated as failure.
 
-```yaml
-scanner:
-  target_url: "https://target.com"
-  default_threads: 5            # 1-50
-  default_depth: 2              # crawl depth 1-10
-  max_urls: 100
-  timeout: 10                   # HTTP timeout (seconds)
-  scan_url_timeout: 30
-  user_agent: "Deep-Eye/1.4"
-  follow_redirects: true
-  verify_ssl: true
-  max_retries: 3
-  enable_recon: false
-  full_scan: false
-  quick_scan: false
-  ai_provider: "openai"        # which provider to use
-  oast_callback_url: ""
-  proxy: ""
-  custom_headers: {}
-  cookies: {}
-```
+---
 
-### vulnerability_scanner
+## `scanner`
+
+| Key | Notes |
+|-----|--------|
+| `target_url` | Default target (CLI `-u` overrides) |
+| `default_threads` | 1–50 |
+| `default_depth` | Crawl depth 1–10 |
+| `max_urls` | Cap discovered URLs |
+| `timeout` / `scan_url_timeout` | HTTP / per-URL scan timeout |
+| `enable_recon` / `full_scan` / `quick_scan` | Modes |
+| `ai_provider` | Name under `ai_providers` |
+| `oast_callback_url` | Blind SSRF/XXE callback (preferred if set) |
+| `proxy`, `custom_headers`, `cookies` | Transport |
+
+---
+
+## `vulnerability_scanner`
+
+### `enabled_checks`
+
+List of check names. Built-ins + modules. Examples:
+
+**Classic:** `sql_injection`, `xss`, `ssrf`, `xxe`, `jwt_vulnerabilities`, `cors_misconfiguration`, …
+
+**Modules:** `api_security`, `nosql_injection`, `http_smuggling`, `directory_bruteforce`, `port_scanner`, …
+
+**Feature pack:** `cors_csp`, `jwt_deep`, `graphql_deep`, `idor`, `stored_xss`, `email_injection`, `cache_deception`, `h2_smuggle`, `supply_chain_js`, `waf_fingerprint`, `ssrf_cloud`
+
+Full list is maintained in `config.example.yaml`.
+
+### `payload_generation`
+
+`use_ai`, `context_aware`, `cve_database`, `use_payload_obfuscation`, …
+
+---
+
+## Pipeline features
+
+### `openapi`
 
 ```yaml
-vulnerability_scanner:
-  enabled_checks:
-    - sql_injection
-    - xss
-    - command_injection
-    - ssrf
-    - xxe
-    - path_traversal
-    - csrf
-    - open_redirect
-    - cors_misconfiguration
-    - security_misconfiguration
-    - lfi
-    - rfi
-    - ssti
-    - crlf_injection
-    - host_header_injection
-    - ldap_injection
-    - xml_injection
-    - insecure_deserialization
-    - authentication_bypass
-    - information_disclosure
-    - sensitive_data_exposure
-    - jwt_vulnerabilities
-    - broken_authentication
-
-  payload_generation:
-    use_ai: true
-    context_aware: true
-    cve_database: false
-    custom_wordlists: []
-    use_payload_obfuscation: false
-
-  testing:
-    thorough_mode: false
-    time_based_detection_delay: 5
-    blind_injection_attempts: 3
-```
-
-### reporting
-
-```yaml
-reporting:
-  enabled: true
-  output_directory: "reports"
-  output_filename: ""           # auto-generated if empty
-  default_format: "html"        # html, pdf, json, sarif
-  formats:                      # additional exports
-    - junit
-    - csv
-    - xlsx
-  xlsx_interactive_install: true
-```
-
-### compliance
-
-```yaml
-compliance:
+openapi:
   enabled: false
-  frameworks:
-    - pci_dss        # PCI-DSS v4.0
-    - soc2           # SOC 2 Type II
-    - iso_27001      # ISO 27001:2022
+  source: ""   # file path or URL
 ```
 
-### ai_triage
+Seeds crawl with expanded OpenAPI/Swagger endpoints.
+
+### `auth_session`
+
+```yaml
+auth_session:
+  enabled: false
+  default_role: "user"
+  store_path: "data/auth_sessions.json"
+  roles:
+    user: { cookies: {}, headers: {} }
+```
+
+### `ai_planner` / `evidence_summary` / `fp_replay`
+
+```yaml
+ai_planner:
+  enabled: false
+  use_ai: true
+  budget_seconds: 600
+  max_urls: 50
+  threads: 5
+
+evidence_summary:
+  enabled: false
+  min_severity: high
+  max_findings: 15
+
+fp_replay:
+  enabled: false
+```
+
+### `ai_triage` / `bug_bounty`
 
 ```yaml
 ai_triage:
   enabled: false
-  drop_false_positives: true
-  drop_threshold: 0.8          # confidence to drop (0.0-1.0)
-  min_severity: "low"
-```
+  drop_false_positives: false
+  drop_threshold: 0.8
+  min_severity: high
 
-### bug_bounty
-
-```yaml
 bug_bounty:
   enabled: false
-  format: "markdown"
-  min_severity: "medium"
-  output_directory: "reports/bounty"
-  one_file_per_vuln: true
+  format: hackerone   # hackerone | bugcrowd | generic
+  min_severity: high
+  output_directory: reports/bounty
 ```
 
-### templates
+### `templates` / `challenge_solver` / `login_replay` / `captcha` / `intercepting_proxy`
 
 ```yaml
 templates:
   enabled: false
-  template_directories:
-    - "templates/nuclei"
-  tag_filters: []              # empty = all tags
-  severity_filter: ""          # empty = all severities
-```
+  template_directories: ["templates"]
+  tag_filters: []
+  severity_filter: []
 
-### challenge_solver
-
-```yaml
 challenge_solver:
   enabled: false
-  vendors:
-    - "cloudflare"
-    - "akamai"
-  playwright_headless: true
-  cookie_ttl_seconds: 1800
-  timeout_seconds: 30
-```
+  vendors: [cloudflare, akamai]
 
-### intercepting_proxy
+login_replay:
+  enabled: false
+  macro_path: config/login_macro.json
+  abort_on_fail: true
 
-```yaml
+captcha:
+  enabled: false
+  skip_protected: true
+
 intercepting_proxy:
   enabled: false
   required: false
-  bind_host: "127.0.0.1"
   proxy_port: 8080
   mitmweb_port: 8081
 ```
 
-### captcha
-
-```yaml
-captcha:
-  enabled: false
-  skip_protected: true
-  vendors:
-    - "recaptcha"
-    - "hcaptcha"
-    - "turnstile"
-    - "arkose"
-```
-
-### login_replay
-
-```yaml
-login_replay:
-  enabled: false
-  macro_path: "config/login_macro.yaml"
-  abort_on_fail: true
-  recheck_interval_seconds: 300
-```
-
-### rag
+### `rag` / `compliance` / `cve_intelligence`
 
 ```yaml
 rag:
   enabled: false
-  index_path: "data/rag_index"
-  auto_rebuild: false
+  index_path: data/cve_rag_index.pkl
+  auto_rebuild: true
   top_k: 5
-  min_score: 0.7
-```
+  min_score: 0.15
 
-### websocket
-
-```yaml
-websocket:
+compliance:
   enabled: false
-  test_origin_validation: true
-  test_authentication: true
-  test_injection_attacks: true
-  test_dos_attacks: false
-  test_rate_limiting: true
-  test_tls_verification: true
-  connection_timeout: 10
-  max_message_size: 65536
+  frameworks: [pci_dss, soc2, iso_27001]
+
+cve_intelligence:
+  database_path: data/cve_intelligence.db
 ```
 
-### ml_detection
+### `oast` / `tls_evasion` / `scope`
 
 ```yaml
-ml_detection:
+oast:
   enabled: false
-  baseline_samples: 50
-  anomaly_threshold: 0.7
-  features:
-    - response_time
-    - status_code
-    - content_length
-    - error_keywords
-  save_model: true
-  model_path: "data/ml_model.pkl"
-```
+  host: "0.0.0.0"
+  port: 9999
 
-### osint
-
-```yaml
-osint:
+tls_evasion:
   enabled: false
-  google_dorking: true
-  email_harvesting: true
-  metadata_extraction: true
-  social_media_check: true
-  breach_database_check: true
-  certificate_transparency: true
-  github_search: true
-  pastebin_search: true
-  max_search_results: 50
-  timeout: 15
-```
+  impersonate: "chrome120"   # requires: pip install curl_cffi
 
-### payload_obfuscation
-
-```yaml
-payload_obfuscation:
-  enabled: false
-  techniques:
-    - base64
-    - url_encode
-    - double_url_encode
-    - unicode
-    - hex
-    - random_case
-    - comment_insertion
-    - string_concatenation
-    - null_byte
-    - char_substitution
-    - multiple_encoding
-  waf_bypass_mode: false
-```
-
-### reconnaissance
-
-```yaml
-reconnaissance:
-  enabled_modules:
-    - dns_enumeration
-    - whois_lookup
-    - technology_detection
-    - ssl_analysis
-    - osint_gathering
-  subdomain_sources:
-    - certificate_transparency
-    - dns_bruteforce
-  port_scan:
-    common_ports: [80, 443, 8080, 8443, 3000, 5000, 8000, 9090]
-    scan_timeout: 5
-```
-
-### rate_limiting
-
-```yaml
-rate_limiting:
-  enabled: true
-  requests_per_second: 5
-  burst_size: 10
-  delay_on_error: 3
-```
-
-### proxy
-
-```yaml
-proxy:
-  enabled: false
-  http: "http://127.0.0.1:8080"
-  https: "http://127.0.0.1:8080"
-```
-
-### scope
-
-```yaml
 scope:
   enabled: false
-  allowed_hosts: []            # empty = target host only
-  excluded_paths:
-    - "/logout"
-    - "/admin"
-  allowed_ports: [80, 443, 8080, 8443]
+  allowed_hosts: ["*.example.com"]
+  excluded_paths: ["/logout"]
+  allowed_ports: [80, 443, 8080]
+  path_allow: ["/api/*"]     # optional allowlist of path patterns
 ```
 
-### advanced
+NL CLI: `--scope-nl "only /api/* no /logout host target.com ports 80,443"` merges into `scope`.
+
+### `reporting`
 
 ```yaml
-advanced:
-  enable_javascript_rendering: false
-  screenshot_enabled: false
-  enable_browser_use_ai: false
-  browser_timeout: 30
-  ua_rotation: false
-  jitter_min: 0
-  jitter_max: 0
-  proxy_pool: []
-  exclude_extensions: [".jpg", ".png", ".gif", ".css", ".js", ".ico"]
-  exclude_patterns: []
-  max_response_size: 10485760  # 10MB
-  custom_dns_servers: []
+reporting:
+  enabled: true
+  output_directory: reports
+  default_format: html
+  formats: []              # e.g. [html, json, junit]
+  dedupe: true             # fingerprint collapse
+  xlsx_interactive_install: true
 ```
 
-### experimental
+### `advanced`
+
+Browser automation, timeouts, UA rotation, jitter, `proxy_pool`, `exclude_extensions`, `exclude_patterns`, `max_response_size`.
+
+### `experimental`
 
 ```yaml
 experimental:
   enable_subdomain_scanning: false
-  aggressive_subdomain_enum: false
-  max_subdomains_to_scan: 50
   enable_cve_matching: false
-  cve_database_path: "data/cve_intelligence.db"
-  auto_update_cve_db: false
-  cve_lookback_days: 365
+  cve_database_path: data/cve_intelligence.db
 ```
 
-### notifications
+### `plugin_manager` / `plugins` / `notifications` / `rate_limiting` / `database` / `logging`
+
+See `config.example.yaml` for full fields. Plugins: `plugin_manager.enabled: true`, per-plugin `plugins.<id>.enabled`.
+
+### Feature knobs
 
 ```yaml
-notifications:
-  enabled: false
-  notify_on_critical: true
-  email:
-    enabled: false
-    smtp_host: "smtp.gmail.com"
-    smtp_port: 587
-    username: ""
-    password: ""
-    from_address: ""
-    recipients: []
-  slack:
-    enabled: false
-    webhook_url: ""
-  discord:
-    enabled: false
-    webhook_url: ""
+idor: { max_swaps: 5 }
+jwt_deep: { weak_secrets: ["secret", "password"] }
+stored_xss: { marker: "deepeye_sxss_" }
+osint: { hibp_api_key: "" }
 ```
 
-### secrets_scanner
+---
 
-```yaml
-secrets_scanner:
-  enabled: true
-  scan_response_body: true
-  scan_response_headers: true
-  scan_javascript_files: true
-  check_git_exposure: true
-  enable_entropy_detection: true
-  min_entropy: 4.5
-  min_length: 8
-```
+## Environment notes
 
-### logging
+- Prefer **not** committing real `config.yaml` (secrets).
+- `chmod 600 config/config.yaml` on Unix when keys present.
+- Custom DNS cannot be set per-request in `requests`; use OS DNS tools.
 
-```yaml
-logging:
-  level: "INFO"                # DEBUG, INFO, WARNING, ERROR
-  log_to_file: true
-  log_file: "logs/deep_eye.log"
-  max_file_size: 10485760      # 10MB
-  backup_count: 5
-```
+## Related
 
-### database
-
-```yaml
-database:
-  enabled: true
-  type: "sqlite"
-  path: "data/deep_eye.db"
-  auto_cleanup_days: 30
-```
-
-### plugin_manager
-
-```yaml
-plugin_manager:
-  enabled: false
-  plugin_directory: "plugins"
-  auto_load: true
-```
-
-## Environment Variable Substitution
-
-Config values support `${ENV_VAR}` and `${ENV_VAR:-default}` syntax:
-
-```yaml
-ai_providers:
-  openai:
-    api_key: "${OPENAI_API_KEY}"
-    model: "${OPENAI_MODEL:-gpt-4o}"
-```
-
-## CLI Overrides
-
-| CLI Flag | Overrides |
-|----------|-----------|
-| `-u URL` | `scanner.target_url` |
-| `--formats` | `reporting.formats` |
-| `-v` | Sets verbose logging |
+- [QUICKSTART.md](QUICKSTART.md)  
+- [MODULES.md](MODULES.md)  
+- [SCAN_FLOW.md](SCAN_FLOW.md)  

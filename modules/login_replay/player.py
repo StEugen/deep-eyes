@@ -143,7 +143,41 @@ class LoginPlayer:
             time.sleep(float(step.get("seconds", 1)))
 
         elif action == "playwright":
-            logger.warning(f"Step {step_index}: 'playwright' action not implemented in v1 player")
+            url = step.get("url") or step.get("goto")
+            if not url:
+                logger.warning(f"Step {step_index}: playwright action missing url/goto")
+                return
+            try:
+                from playwright.sync_api import sync_playwright
+            except ImportError:
+                logger.warning(
+                    f"Step {step_index}: playwright not installed "
+                    "(pip install playwright && playwright install chromium)"
+                )
+                return
+            headless = step.get("headless", True)
+            wait_ms = int(step.get("wait_ms", 2000))
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=headless)
+                page = browser.new_page()
+                page.goto(url, wait_until="domcontentloaded")
+                for click_sel in step.get("clicks", []) or []:
+                    page.click(click_sel)
+                for fill in step.get("fills", []) or []:
+                    page.fill(fill.get("selector", ""), fill.get("value", ""))
+                if step.get("submit"):
+                    page.click(step["submit"])
+                page.wait_for_timeout(wait_ms)
+                self._last_response_text = page.content()
+                if hasattr(self.http_client, "session"):
+                    for c in page.context.cookies():
+                        self.http_client.session.cookies.set(
+                            c.get("name", ""),
+                            c.get("value", ""),
+                            domain=c.get("domain"),
+                            path=c.get("path", "/"),
+                        )
+                browser.close()
 
         else:
             raise MacroError(f"Unknown action: {action}")

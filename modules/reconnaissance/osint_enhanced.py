@@ -106,15 +106,36 @@ class EnhancedOSINT:
         return social_accounts
     
     def check_data_breaches(self, domain: str) -> List[Dict]:
-        """Check for data breaches involving domain."""
+        """Check for data breaches involving domain via HIBP if API key set."""
         breaches = []
-        
-        # In real implementation, integrate with HaveIBeenPwned API
+        api_key = self.config.get('osint', {}).get('hibp_api_key', '')
+        if not api_key:
+            logger.info(
+                f"Skipping HIBP breach check for {domain} "
+                "(set osint.hibp_api_key to enable)"
+            )
+            return breaches
+
         logger.info(f"Checking data breaches for {domain}")
-        
-        # Placeholder for breach data
-        # Real implementation would query breach databases
-        
+        try:
+            resp = self.http_client.get(
+                f"https://haveibeenpwned.com/api/v3/breaches?domain={domain}",
+                headers={"hibp-api-key": api_key, "user-agent": "Deep-Eye"},
+            )
+            if not resp or getattr(resp, 'status_code', 0) != 200:
+                return breaches
+            data = resp.json() if hasattr(resp, 'json') else []
+            if callable(data):
+                data = data()
+            for item in data or []:
+                breaches.append({
+                    'Name': item.get('Name', 'unknown'),
+                    'BreachDate': item.get('BreachDate', ''),
+                    'Domain': item.get('Domain', domain),
+                    'PwnCount': item.get('PwnCount', 0),
+                })
+        except Exception as e:
+            logger.debug(f"HIBP breach check failed: {e}")
         return breaches
     
     def find_exposed_files(self, domain: str) -> List[Dict]:

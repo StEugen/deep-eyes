@@ -97,59 +97,49 @@ class PluginManager:
             return 0
         
         loaded_count = 0
-        
-        # Scan for Python files in plugin directory
+
         for plugin_file in self.plugin_dir.glob('*.py'):
             if plugin_file.name.startswith('_'):
                 continue
-            
+
             try:
-                plugin_class = self._load_plugin_file(plugin_file)
-                if plugin_class:
+                for plugin_class in self._load_plugin_classes(plugin_file):
                     plugin_instance = plugin_class(self.http_client, self.config)
                     plugin_id = plugin_instance.get_plugin_id()
                     self.plugins[plugin_id] = plugin_instance
                     loaded_count += 1
                     logger.info(f"Loaded plugin: {plugin_instance.name} v{plugin_instance.version}")
-            
             except Exception as e:
                 logger.error(f"Error loading plugin {plugin_file.name}: {e}")
-        
+
         logger.info(f"Loaded {loaded_count} plugin(s)")
         return loaded_count
-    
-    def _load_plugin_file(self, plugin_file: Path) -> Optional[Type[PluginBase]]:
-        """
-        Load plugin class from file.
-        
-        Args:
-            plugin_file: Path to plugin file
-            
-        Returns:
-            Plugin class or None
-        """
+
+    def _load_plugin_classes(self, plugin_file: Path) -> List[Type[PluginBase]]:
         try:
-            # Import module
             spec = importlib.util.spec_from_file_location(plugin_file.stem, plugin_file)
             if not spec or not spec.loader:
-                return None
-            
+                return []
+
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            
-            # Find PluginBase subclass
-            for name, obj in inspect.getmembers(module):
-                if (inspect.isclass(obj) and 
-                    issubclass(obj, PluginBase) and 
-                    obj is not PluginBase):
-                    return obj
-            
-            logger.warning(f"No PluginBase subclass found in {plugin_file.name}")
-            return None
+
+            found = [
+                obj
+                for name, obj in inspect.getmembers(module)
+                if (
+                    inspect.isclass(obj)
+                    and issubclass(obj, PluginBase)
+                    and obj is not PluginBase
+                )
+            ]
+            if not found:
+                logger.warning(f"No PluginBase subclass found in {plugin_file.name}")
+            return found
         
         except Exception as e:
             logger.error(f"Error loading plugin file {plugin_file.name}: {e}")
-            return None
+            return []
     
     def get_enabled_plugins(self) -> List[PluginBase]:
         """Get list of enabled plugins."""
