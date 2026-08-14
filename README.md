@@ -1,5 +1,6 @@
 <p align="center">
   <a href="https://trendshift.io/repositories/24003?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-24003" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/24003" alt="zakirkun%2Fdeep-eye | Trendshift" width="250" height="55"/></a>
+  <br />
   <img src="./assets/logo.png" height="300">
 </p>
 
