@@ -82,6 +82,15 @@ class AIProviderManager:
             except Exception as e:
                 logger.warning(f"Failed to initialize OpenRouter provider: {e}")
 
+        if ai_config.get("orcarouter", {}).get("enabled", False):
+            try:
+                from ai_providers.orcarouter_provider import OrcaRouterProvider
+
+                self.providers["orcarouter"] = OrcaRouterProvider(ai_config["orcarouter"])
+                logger.info("OrcaRouter provider initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize OrcaRouter provider: {e}")
+
         if ai_config.get("gemini", {}).get("enabled", False):
             try:
                 from ai_providers.gemini_provider import GeminiProvider

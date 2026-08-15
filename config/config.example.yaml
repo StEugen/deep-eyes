@@ -60,6 +60,15 @@ ai_providers:
     site_url: "https://github.com/zakirkun/deep-eye"
     site_name: "Deep Eye"
 
+  orcarouter:
+    enabled: false
+    api_key: "sk-orca-your-orcarouter-api-key-here"
+    base_url: "https://api.orcarouter.ai/v1"
+    model: "openai/gpt-4o"
+    temperature: 0.7
+    max_tokens: 2000
+    timeout: 30
+
   mistral:
     enabled: false
     api_key: "mistral-your-api-key-here"
@@ -113,7 +122,7 @@ scanner:
   quick_scan: false    # Quick scan (basic tests only)
   
   # AI Provider selection
-  ai_provider: "openai"  # Options: openai, claude, grok, ollama, mistral, openrouter
+  ai_provider: "openai"  # Options: openai, claude, grok, ollama, mistral, openrouter, orcarouter
   
   # Out-of-Band Application Security Testing (OAST) callback URL
   # IMPORTANT: Set this to a server you control (e.g., Burp Collaborator, interact.sh)

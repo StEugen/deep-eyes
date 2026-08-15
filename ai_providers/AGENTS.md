@@ -16,6 +16,7 @@ ai_providers/
 ├── groq_provider.py
 ├── mistral_provider.py
 ├── openrouter_provider.py
+├── orcarouter_provider.py
 ├── litellm_provider.py
 └── lmstudio_provider.py
 ```
