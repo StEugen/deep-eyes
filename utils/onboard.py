@@ -84,6 +84,13 @@ PROVIDERS = {
         "needs_key": True,
         "default_model": "openai/gpt-4o-mini",
     },
+    "12": {
+        "key": "orcarouter",
+        "name": "OrcaRouter",
+        "needs_key": True,
+        "default_model": "openai/gpt-4o",
+        "base_url": "https://api.orcarouter.ai/v1",
+    },
 }
 
 CORE_CHECKS = [
