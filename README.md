@@ -253,7 +253,7 @@ python scripts/build_cve_rag_index.py
 
 <p align="center">
   <a href="https://inferhub.dev/signup?ref=saqutsy3" target="_blank" rel="noopener noreferrer">
-    <img src="./assets/inferhub-logo.png" alt="InferHub" height="80">
+    <img src="./assets/inferhub-logo.jpg" alt="InferHub" height="140" widht="100">
   </a>
 </p>
 
