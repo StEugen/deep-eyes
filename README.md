@@ -249,6 +249,18 @@ python scripts/update_cve_database.py
 python scripts/build_cve_rag_index.py
 ```
 
+## Sponsors
+
+<p align="center">
+  <a href="https://inferhub.dev/signup?ref=saqutsy3" target="_blank" rel="noopener noreferrer">
+    <img src="./assets/inferhub-logo.png" alt="InferHub" height="80">
+  </a>
+</p>
+
+<p align="center">
+  Deep Eye is proudly sponsored by <a href="https://inferhub.dev/signup?ref=saqutsy3">InferHub</a>.
+</p>
+
 ## Legal Disclaimer
 
 Deep Eye is for **authorized security testing only**.
