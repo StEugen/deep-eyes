@@ -91,6 +91,13 @@ PROVIDERS = {
         "default_model": "openai/gpt-4o",
         "base_url": "https://api.orcarouter.ai/v1",
     },
+    "13": {
+        "key": "nvidia_nim",
+        "name": "NVIDIA NIM",
+        "needs_key": True,
+        "default_model": "nvidia/nemotron-3-ultra-550b-a55b",
+        "base_url": "https://integrate.api.nvidia.com/v1",
+    },
 }
 
 CORE_CHECKS = [

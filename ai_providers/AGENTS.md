@@ -18,6 +18,7 @@ ai_providers/
 ├── openrouter_provider.py
 ├── orcarouter_provider.py
 ├── litellm_provider.py
+├── nvidia_nim_provider.py
 └── lmstudio_provider.py
 ```
 
