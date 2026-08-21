@@ -79,7 +79,7 @@ class NvidiaNIMProvider:
             if not response.choices:
                 return ""
 
-            return response.choices[0].message.content or ""
+            return response.choices[0].message.content
 
         except Exception as e:
             logger.error(f"NVIDIA NIM generation error: {e}")
