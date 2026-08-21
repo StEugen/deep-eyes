@@ -99,6 +99,15 @@ ai_providers:
     temperature: 0.7
     max_tokens: 2000
     timeout: 60
+  
+  nvidia_nim:
+    enabled: false
+    api_key: "your-nvidia-nim-api-key-here"
+    base_url: "https://integrate.api.nvidia.com/v1"
+    model: "nvidia/nemotron-3-ultra-550b-a55b"
+    temperature: 0.7
+    max_tokens: 2000
+    timeout: 60
 
 # Scanner Settings
 scanner:
@@ -122,7 +131,7 @@ scanner:
   quick_scan: false    # Quick scan (basic tests only)
   
   # AI Provider selection
-  ai_provider: "openai"  # Options: openai, claude, grok, ollama, mistral, openrouter, orcarouter
+  ai_provider: "openai"  # Options: openai, claude, grok, ollama, mistral, openrouter, orcarouter, nvidia_nim
   
   # Out-of-Band Application Security Testing (OAST) callback URL
   # IMPORTANT: Set this to a server you control (e.g., Burp Collaborator, interact.sh)

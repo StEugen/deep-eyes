@@ -153,7 +153,7 @@ ai_providers:
     model: "llama2"
 ```
 
-Supported: `openai`, `claude`, `grok`, `ollama`, `gemini`, `openrouter`, `orcarouter`, `requesty`, `mistral`, `groq`, `lmstudio`, `litellm`
+Supported: `openai`, `claude`, `grok`, `ollama`, `gemini`, `openrouter`, `orcarouter`, `requesty`, `mistral`, `groq`, `lmstudio`, `litellm`, `nvidia_nim`
 
 ### Scanner Settings
 

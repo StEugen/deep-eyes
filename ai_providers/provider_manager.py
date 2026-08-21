@@ -127,6 +127,15 @@ class AIProviderManager:
             except Exception as e:
                 logger.warning(f"Failed to initialize LiteLLM provider: {e}")
 
+        if ai_config.get("nvidia_nim", {}).get("enabled", False):
+            try:
+                from ai_providers.nvidia_nim_provider import NvidiaNIMProvider
+
+                self.providers["nvidia_nim"] = NvidiaNIMProvider(ai_config["nvidia_nim"])
+                logger.info("NVIDIA NIM provider initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize NVIDIA NIM provider: {e}")
+
     def set_provider(self, provider_name: str) -> bool:
         if provider_name not in self.providers:
             logger.error(f"Provider {provider_name} not available")
