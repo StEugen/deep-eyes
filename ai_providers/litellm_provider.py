@@ -30,6 +30,14 @@ class LiteLLMProvider:
         self.temperature = config.get("temperature", 0.7)
         self.max_tokens = config.get("max_tokens", 2000)
 
+        # If liteLLM is already running as a proxy server, use this
+        # with base_url: "http://ADDR:PORT" in config/config.yaml
+        # where ADDR and PORT represent where liteLLM is running.
+        # NOTE: prefix the model name in config/config.yaml with "openai/"
+        # so litellm routes through the standard OpenAI-compatible client
+        # rather than ignoring base_url.
+        self.base_url = config.get("base_url") or config.get("api_base")
+
     def generate(self, prompt: str, **kwargs) -> str:
         """
         Generate response using LiteLLM.
@@ -58,6 +66,9 @@ class LiteLLMProvider:
 
             if self.api_key:
                 params["api_key"] = self.api_key
+
+            if self.base_url:
+                params["api_base"] = self.base_url
 
             response = litellm.completion(**params)
 
