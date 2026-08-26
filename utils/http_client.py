@@ -155,6 +155,7 @@ class HTTPClient:
         params: Optional[Dict] = None,
         headers: Optional[Dict] = None,
         allow_redirects: bool = True,
+        timeout: Optional[int] = None,
         **kwargs
     ) -> Optional[requests.Response]:
         """Make GET request with response size limiting."""
@@ -174,7 +175,7 @@ class HTTPClient:
                 url,
                 params=params,
                 headers=headers,
-                timeout=self.timeout,
+                timeout=timeout if timeout is not None else self.timeout,
                 verify=self.verify_ssl,
                 allow_redirects=allow_redirects,
                 stream=True,  # Enable streaming to check content length
@@ -233,6 +234,7 @@ class HTTPClient:
         data: Optional[Dict] = None,
         json: Optional[Dict] = None,
         headers: Optional[Dict] = None,
+        timeout: Optional[int] = None,
         **kwargs
     ) -> Optional[requests.Response]:
         """Make POST request with response size limiting."""
@@ -252,7 +254,7 @@ class HTTPClient:
                 data=data,
                 json=json,
                 headers=headers,
-                timeout=self.timeout,
+                timeout=timeout if timeout is not None else self.timeout,
                 verify=self.verify_ssl,
                 stream=True,  # Enable streaming
                 **kwargs
