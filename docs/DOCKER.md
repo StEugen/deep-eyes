@@ -150,7 +150,8 @@ Some optional Deep Eye modules conflict with that isolation:
 - Frida/mobile testing requires USB/device access and the Frida CLI;
 - local OAST requires an explicitly published callback port and externally routable address;
 - custom plugins execute arbitrary Python in the scanner process;
-- untrusted template DSL and pickle/RAG files must not be mounted.
+- templates may issue scanner requests and must still come from a reviewed source;
+- legacy pickle RAG files are rejected; mount only the validated JSON index format.
 
 Create a separate, explicitly reviewed Compose override for those features instead of weakening the default service.
 

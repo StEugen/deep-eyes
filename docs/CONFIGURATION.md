@@ -27,6 +27,13 @@ Supported: `openai`, `claude`, `grok`, `ollama`, `gemini`, `openrouter`, `orcaro
 
 Each block: `enabled`, `api_key` (if needed), `model`, `temperature`, `max_tokens`, `timeout`, optional `base_url`.
 
+XLSX export uses the declared `openpyxl` dependency. Deep Eye never invokes
+`pip install` during a scan or report build.
+
+Custom plugins require both `plugin_manager.enabled: true` and an explicit
+filename in `plugin_manager.allowed_plugins`. Allowed plugin classes must also
+be enabled under `plugins.<plugin_id>.enabled` before they are registered.
+
 Providers implement `generate(prompt, **kwargs) -> str`. Manager retries and failovers; empty responses are treated as failure.
 
 ---
@@ -159,7 +166,7 @@ intercepting_proxy:
 ```yaml
 rag:
   enabled: false
-  index_path: data/cve_rag_index.pkl
+  index_path: data/cve_rag_index.json
   auto_rebuild: true
   top_k: 5
   min_score: 0.15
@@ -203,7 +210,6 @@ reporting:
   default_format: html
   formats: []              # e.g. [html, json, junit]
   dedupe: true             # fingerprint collapse
-  xlsx_interactive_install: true
 ```
 
 ### `advanced`

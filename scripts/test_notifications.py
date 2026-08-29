@@ -42,7 +42,7 @@ def test_scan_complete_notification(config_path: str = "config/config.yaml"):
         print(f"✓ Discord enabled: {discord_config.get('enabled', False)}")
         webhook_url = discord_config.get('webhook_url', '')
         if webhook_url:
-            print(f"✓ Discord webhook URL: {webhook_url[:50]}...")
+            print("✓ Discord webhook URL configured")
         else:
             print("❌ Discord webhook URL not configured")
 
@@ -109,6 +109,7 @@ def test_critical_vulnerability_notification(config_path: str = "config/config.y
         # Load config
         config = ConfigLoader.load(config_path)
         notification_manager = NotificationManager(config)
+        discord_config = notification_manager.notification_config.get("discord", {})
 
         if not notification_manager.enabled:
             print("\n❌ Notifications are DISABLED in config")
@@ -137,7 +138,8 @@ def test_critical_vulnerability_notification(config_path: str = "config/config.y
 
         if success:
             print("\n✅ Test critical alert sent successfully!")
-            print("   Check your Discord channel for the @here mention.")
+            if discord_config.get("mention_here", False):
+                print("   Check your Discord channel for the explicitly enabled @here mention.")
             return True
         else:
             print("\n❌ Failed to send test critical alert")

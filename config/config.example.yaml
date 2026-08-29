@@ -370,7 +370,6 @@ reporting:
   output_filename: ""  # Custom filename stem (auto-generated if empty); extensions appended per format
   default_format: "html"  # Single-format fallback. Options: html, pdf, json, sarif, junit, csv, xlsx
   formats: []  # Multi-format list. If non-empty, takes precedence over default_format. Example: [html, junit, csv, xlsx]
-  xlsx_interactive_install: true  # Prompt to install openpyxl when missing (xlsx only)
   include_sections:
     - executive_summary
     - vulnerability_details
@@ -436,7 +435,7 @@ compliance:
 # RAG over CVE Database (Group F)
 rag:
   enabled: false  # Auto-link findings to similar CVEs and ground AI payload generation
-  index_path: "data/cve_rag_index.pkl"  # Pickle index location
+  index_path: "data/cve_rag_index.json"  # Validated, non-executable JSON index
   auto_rebuild: true  # Rebuild index when CVE DB updated
   top_k: 5  # Max hits per query
   min_score: 0.15  # Cosine similarity threshold
@@ -628,7 +627,12 @@ mobile:
 plugin_manager:
   enabled: false  # Enable custom plugin system
   plugin_directory: "plugins"  # Directory for custom vulnerability scanner plugins
-  auto_load: true  # Automatically load all plugins on startup
+  # Explicit filenames only. No plugin code is imported when this list is empty.
+  allowed_plugins: []  # Example: ["example_plugin.py"]
+
+plugins:
+  example:
+    enabled: false
 
 # Notification System (v1.3.0)
 notifications:
@@ -658,6 +662,7 @@ notifications:
   # Discord Notifications
   discord:
     enabled: false
+    mention_here: false  # Explicit opt-in for @here on critical alerts
     webhook_url: "https://discord.com/api/webhooks/YOUR/WEBHOOK/URL"
     username: "Deep Eye Scanner"  # Optional: custom bot name
     avatar_url: ""  # Optional: custom avatar URL

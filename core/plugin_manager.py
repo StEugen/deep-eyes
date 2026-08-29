@@ -3,9 +3,10 @@ Plugin Manager
 Manages custom vulnerability scanner plugins
 """
 
-import os
 import importlib.util
 import inspect
+import re
+import stat
 from typing import Dict, List, Optional, Type
 from pathlib import Path
 from utils.logger import get_logger
@@ -82,7 +83,10 @@ class PluginManager:
         self.http_client = http_client
         self.config = config
         self.plugins: Dict[str, PluginBase] = {}
-        self.plugin_dir = Path(config.get('plugin_manager', {}).get('plugin_directory', 'plugins'))
+        manager_config = config.get('plugin_manager', {})
+        self.plugin_dir = Path(manager_config.get('plugin_directory', 'plugins'))
+        allowed = manager_config.get('allowed_plugins', [])
+        self.allowed_plugins = allowed if isinstance(allowed, list) else []
         
     def load_plugins(self) -> int:
         """
@@ -93,18 +97,64 @@ class PluginManager:
         """
         if not self.plugin_dir.exists():
             logger.info(f"Plugin directory not found: {self.plugin_dir}")
-            self.plugin_dir.mkdir(parents=True, exist_ok=True)
+            return 0
+
+        try:
+            plugin_root = self.plugin_dir.resolve(strict=True)
+            root_stat = plugin_root.stat()
+        except (OSError, RuntimeError) as e:
+            logger.error(f"Plugin directory cannot be resolved safely: {e}")
+            return 0
+
+        if not plugin_root.is_dir() or self.plugin_dir.is_symlink():
+            logger.error("Plugin directory must be a real directory, not a symlink")
+            return 0
+        if stat.S_IMODE(root_stat.st_mode) & stat.S_IWOTH:
+            logger.error("Plugin directory is world-writable; refusing to load plugins")
+            return 0
+
+        allowed_files = []
+        for configured_name in self.allowed_plugins:
+            name = str(configured_name or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*\.py", name):
+                logger.warning(f"Ignoring invalid allowed plugin filename: {name!r}")
+                continue
+            allowed_files.append(name)
+        if not allowed_files:
+            logger.warning(
+                "Plugin manager is enabled but plugin_manager.allowed_plugins is empty; "
+                "no plugin code will be imported"
+            )
             return 0
         
         loaded_count = 0
 
-        for plugin_file in self.plugin_dir.glob('*.py'):
-            if plugin_file.name.startswith('_'):
+        for plugin_name in dict.fromkeys(allowed_files):
+            plugin_file = plugin_root / plugin_name
+            try:
+                if (
+                    not plugin_file.is_file()
+                    or plugin_file.is_symlink()
+                    or plugin_file.resolve(strict=True).parent != plugin_root
+                ):
+                    logger.warning(f"Allowed plugin is not a safe regular file: {plugin_name}")
+                    continue
+                if stat.S_IMODE(plugin_file.stat().st_mode) & stat.S_IWOTH:
+                    logger.warning(f"Allowed plugin is world-writable; skipping: {plugin_name}")
+                    continue
+            except (OSError, RuntimeError) as e:
+                logger.warning(f"Unable to validate allowed plugin {plugin_name}: {e}")
                 continue
 
             try:
                 for plugin_class in self._load_plugin_classes(plugin_file):
                     plugin_instance = plugin_class(self.http_client, self.config)
+                    if not plugin_instance.is_enabled():
+                        logger.info(
+                            f"Allowed plugin class is disabled in plugins config: "
+                            f"{plugin_instance.get_plugin_id()}"
+                        )
+                        continue
                     plugin_id = plugin_instance.get_plugin_id()
                     self.plugins[plugin_id] = plugin_instance
                     loaded_count += 1

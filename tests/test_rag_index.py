@@ -1,4 +1,5 @@
 """Tests for CVE RAG index (Group F)."""
+import json
 import os
 import sqlite3
 import sys
@@ -74,7 +75,7 @@ def synthetic_cve_db(tmp_path):
 def rag_config(tmp_path):
     return {
         "rag": {
-            "index_path": str(tmp_path / "cve_rag.pkl"),
+            "index_path": str(tmp_path / "cve_rag.json"),
             "top_k": 5,
             "min_score": 0.05,
             "auto_rebuild": True,
@@ -164,6 +165,19 @@ class TestPersistence:
 
         hits = rag2.search("log4j JNDI")
         assert any(h["cve_id"] == "CVE-2021-44228" for h in hits)
+
+        payload = json.loads(Path(rag.index_path).read_text(encoding="utf-8"))
+        assert payload["format"] == "deep-eye-cve-rag"
+        assert payload["version"] == 1
+        assert "documents" in payload
+        assert "vectorizer" not in payload
+
+    def test_rejects_legacy_or_binary_index(self, rag_config):
+        index_path = Path(rag_config["rag"]["index_path"])
+        index_path.write_bytes(b"\x80\x04legacy-pickle-shaped-data")
+        rag = CVERagIndex(rag_config)
+        assert rag.load() is False
+        assert not rag.is_loaded()
 
 
 class TestStaleness:

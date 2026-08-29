@@ -49,15 +49,15 @@ Deep Eye is a powerful security testing tool. Follow these guidelines to protect
 
 - The plugin system (`plugin_manager.enabled`) is **disabled by default** for security
 - Plugins execute with full access to the host OS -- only load plugins you have reviewed
+- `plugin_manager.allowed_plugins` must explicitly list every plugin filename to import
 - Never point `plugin_directory` to a world-writable path
 - Never download plugins from untrusted sources
 
-### ML Model Files
+### RAG Index Files
 
-- The anomaly detector can save/load `.pkl` (pickle) model files
-- **Never load pickle files from untrusted sources** -- they can execute arbitrary code
-- If cloning a fork, verify no `.pkl` files exist in `data/` before running
-- Consider setting `ml_detection.save_model: false` unless you need model persistence
+- RAG indexes use validated JSON and are rebuilt into an in-memory TF-IDF matrix
+- Legacy pickle indexes are rejected; rebuild them with `scripts/build_cve_rag_index.py`
+- Symbolic-link index files, oversized indexes, and malformed document metadata are rejected
 
 ### Scan Data Hygiene
 
@@ -77,9 +77,14 @@ Deep Eye is a powerful security testing tool. Follow these guidelines to protect
 | Area | Status | Notes |
 |------|--------|-------|
 | Plugin sandboxing | Not implemented | Plugins run with full OS access; keep disabled unless needed |
+| Template DSL | Allowlisted AST | Attribute access, imports, comprehensions, and arbitrary calls are rejected |
+| Template regex | Bounded | Pattern/input sizes are capped and matching has a short timeout |
+| RAG persistence | JSON | Legacy pickle indexes are rejected and must be rebuilt |
 | Dependency pinning | Partial | `requirements.txt` uses `>=` floors without upper bounds |
 | SSL verification | Configurable | `verify_ssl: false` disables TLS validation globally, including for AI API calls |
 | Notification sanitization | Implemented | Evidence is redacted before webhook transmission |
+| Webhook logging | Metadata only | Webhook URLs, payloads, and response bodies are not logged |
+| Runtime dependency install | Disabled | Missing optional dependencies fail closed instead of invoking pip |
 | Session ID validation | Implemented | Collaborative scanner validates session ID format |
 | OAST callback | Configurable | Users must set their own callback server |
 

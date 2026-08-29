@@ -128,6 +128,6 @@ Only for small core checks: method on `VulnerabilityScanner`, gate on `enabled_c
 - Authorized targets only
 - Venv: `.deep-venv/` (install scripts use this name)
 - SQLite: `data/deep_eye.db`, `data/cve_intelligence.db`
-- RAG: TF-IDF pickle index (`modules/cve_intelligence/rag_index.py`), not only ChromaDB docs elsewhere may be stale
+- RAG: validated JSON source corpus rebuilt into an in-memory TF-IDF index (`modules/cve_intelligence/rag_index.py`)
 - Hierarchical `AGENTS.md` under core/, modules/, utils/, tests/, packages
 - `CONTRIBUTING.md`: use `modules/<name>/` (not obsolete `modules/exploits/`)
