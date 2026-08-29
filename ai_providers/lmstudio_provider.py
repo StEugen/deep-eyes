@@ -57,7 +57,7 @@ class LMStudioProvider:
                 data = response.json()
                 return data.get("choices", [{}])[0].get("message", {}).get("content", "")
             else:
-                raise Exception(f"LM Studio API error: {response.status_code} - {response.text}")
+                raise RuntimeError(f"LM Studio API error: HTTP {response.status_code}")
 
         except Exception as e:
             logger.error(f"LM Studio generation error: {e}")

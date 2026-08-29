@@ -74,8 +74,7 @@ class ReportGenerator:
         """Generate Excel xlsx workbook (requires openpyxl)."""
         try:
             from utils.exports import build_xlsx
-            interactive = self.report_config.get("xlsx_interactive_install", True)
-            success = build_xlsx(results, output_path, interactive=interactive)
+            success = build_xlsx(results, output_path, interactive=False)
             if success:
                 logger.info(f"Excel report generated: {output_path}")
             else:

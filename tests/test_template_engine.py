@@ -181,6 +181,49 @@ class TestMatchers:
         ])
         assert ok
 
+    @pytest.mark.parametrize(
+        "expression",
+        [
+            "().__class__.__base__.__subclasses__()",
+            "__import__('os').system('id')",
+            "[item for item in body]",
+            "body.upper()",
+            "lambda: 1",
+        ],
+    )
+    def test_dsl_rejects_python_escape_syntax(self, expression):
+        r = MockResponse(status_code=200, text="safe")
+        ok, _ = evaluate_matchers(
+            r,
+            [{"type": "dsl", "dsl": [expression]}],
+        )
+        assert not ok
+
+    def test_parser_rejects_unsafe_dsl(self):
+        unsafe = textwrap.dedent("""
+        id: unsafe-dsl
+        info:
+          name: Unsafe DSL
+          severity: high
+        http:
+          - method: GET
+            path: ["{{BaseURL}}/"]
+            matchers:
+              - type: dsl
+                dsl:
+                  - "body.__class__"
+        """)
+        with pytest.raises(TemplateError, match="unsafe DSL"):
+            parse_template(unsafe)
+
+    def test_regex_pattern_length_is_bounded(self):
+        r = MockResponse(text="a" * 100)
+        ok, _ = evaluate_matchers(
+            r,
+            [{"type": "regex", "regex": ["a" * 2001]}],
+        )
+        assert not ok
+
     def test_condition_and(self):
         r = MockResponse(status_code=200, text="vulnerable")
         ok, _ = evaluate_matchers(

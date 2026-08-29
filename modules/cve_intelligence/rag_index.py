@@ -1,48 +1,45 @@
 """TF-IDF retrieval index over CVE database for RAG.
 
 Lazy-loads scikit-learn. Builds index from cve_entries + cve_technologies tables.
-Persists as pickle. Used to ground AI payload generation and enrich vuln findings.
+Persists as validated JSON. Used to ground AI payload generation and enrich findings.
 """
+import json
 import logging
-import pickle
+import os
 import sqlite3
-import sys
-import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+_INDEX_FORMAT = "deep-eye-cve-rag"
+_INDEX_VERSION = 1
+_MAX_INDEX_BYTES = 64 * 1024 * 1024
+_MAX_DOCUMENTS = 250_000
+_MAX_DOCUMENT_LENGTH = 100_000
+
 
 def _ensure_sklearn(interactive: bool = True) -> bool:
-    """Try to import scikit-learn. Prompt for install if missing."""
+    """Return whether scikit-learn is installed; never install at runtime."""
+    del interactive  # retained for API compatibility
     try:
         import sklearn  # noqa: F401
         return True
     except ImportError:
-        pass
-
-    if not interactive or not sys.stdin.isatty():
         return False
 
-    try:
-        answer = input("[!] RAG needs scikit-learn. Install now? [y/N]: ")
-    except (EOFError, KeyboardInterrupt):
-        return False
 
-    if answer.strip().lower() not in ("y", "yes"):
-        return False
+def _new_vectorizer():
+    from sklearn.feature_extraction.text import TfidfVectorizer
 
-    try:
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "scikit-learn"],
-            check=True,
-        )
-        import sklearn  # noqa: F401
-        return True
-    except (subprocess.CalledProcessError, ImportError):
-        return False
+    return TfidfVectorizer(
+        stop_words="english",
+        ngram_range=(1, 2),
+        max_features=50000,
+        sublinear_tf=True,
+    )
 
 
 class CVERagIndex:
@@ -52,7 +49,7 @@ class CVERagIndex:
         config = config or {}
         rag_config = config.get("rag", {}) if isinstance(config.get("rag"), dict) else {}
 
-        self.index_path = Path(rag_config.get("index_path", "data/cve_rag_index.pkl"))
+        self.index_path = Path(rag_config.get("index_path", "data/cve_rag_index.json"))
         self.top_k = int(rag_config.get("top_k", 5))
         self.min_score = float(rag_config.get("min_score", 0.15))
         self.auto_rebuild = bool(rag_config.get("auto_rebuild", True))
@@ -60,6 +57,7 @@ class CVERagIndex:
         self._vectorizer = None
         self._matrix = None
         self._cve_meta: List[Dict] = []
+        self._documents: List[str] = []
         self._loaded = False
 
     def is_loaded(self) -> bool:
@@ -74,7 +72,7 @@ class CVERagIndex:
         return self.index_path.stat().st_mtime < Path(cve_db_path).stat().st_mtime
 
     def load(self) -> bool:
-        """Load index from pickle. Returns False on failure."""
+        """Load and rebuild an index from the non-executable JSON format."""
         if not self.index_path.exists():
             return False
         if not _ensure_sklearn(interactive=False):
@@ -82,11 +80,37 @@ class CVERagIndex:
             return False
 
         try:
-            with open(self.index_path, "rb") as f:
-                payload = pickle.load(f)
-            self._vectorizer = payload["vectorizer"]
-            self._matrix = payload["matrix"]
-            self._cve_meta = payload["cve_meta"]
+            if self.index_path.is_symlink():
+                raise ValueError("symbolic-link index files are not accepted")
+            if self.index_path.stat().st_size > _MAX_INDEX_BYTES:
+                raise ValueError("index exceeds the maximum supported size")
+            payload = json.loads(self.index_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("index root must be an object")
+            if payload.get("format") != _INDEX_FORMAT or payload.get("version") != _INDEX_VERSION:
+                raise ValueError("unsupported or legacy RAG index format; rebuild the index")
+            documents = payload.get("documents")
+            cve_meta = payload.get("cve_meta")
+            if not isinstance(documents, list) or not isinstance(cve_meta, list):
+                raise ValueError("index documents and metadata must be lists")
+            if not documents or len(documents) != len(cve_meta):
+                raise ValueError("index documents and metadata are inconsistent")
+            if len(documents) > _MAX_DOCUMENTS:
+                raise ValueError("index contains too many documents")
+            if any(
+                not isinstance(document, str) or len(document) > _MAX_DOCUMENT_LENGTH
+                for document in documents
+            ):
+                raise ValueError("index contains an invalid document")
+            if any(not isinstance(entry, dict) for entry in cve_meta):
+                raise ValueError("index contains invalid CVE metadata")
+
+            vectorizer = _new_vectorizer()
+            matrix = vectorizer.fit_transform(documents)
+            self._vectorizer = vectorizer
+            self._matrix = matrix
+            self._documents = list(documents)
+            self._cve_meta = list(cve_meta)
             self._loaded = True
             logger.info(
                 f"RAG index loaded: {len(self._cve_meta)} CVEs from {self.index_path}"
@@ -98,20 +122,42 @@ class CVERagIndex:
             return False
 
     def save(self) -> None:
-        """Persist index to pickle."""
-        if self._vectorizer is None or self._matrix is None:
+        """Persist source documents and metadata as atomic, mode-0600 JSON."""
+        if self._vectorizer is None or self._matrix is None or not self._documents:
             raise RuntimeError("Cannot save unbuilt index")
 
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "vectorizer": self._vectorizer,
-            "matrix": self._matrix,
+            "format": _INDEX_FORMAT,
+            "version": _INDEX_VERSION,
+            "documents": self._documents,
             "cve_meta": self._cve_meta,
             "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "doc_count": len(self._cve_meta),
         }
-        with open(self.index_path, "wb") as f:
-            pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=str(self.index_path.parent),
+                prefix=f".{self.index_path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temp_path = Path(handle.name)
+                os.chmod(handle.name, 0o600)
+                json.dump(payload, handle, ensure_ascii=False, allow_nan=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(str(temp_path), str(self.index_path))
+            temp_path = None
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink()
+                except FileNotFoundError:
+                    pass
         logger.info(f"RAG index saved: {self.index_path} ({len(self._cve_meta)} CVEs)")
 
     def build(self, cve_db_path: str, interactive: bool = True) -> bool:
@@ -123,8 +169,6 @@ class CVERagIndex:
         if not Path(cve_db_path).exists():
             logger.warning(f"RAG: CVE DB not found at {cve_db_path}")
             return False
-
-        from sklearn.feature_extraction.text import TfidfVectorizer
 
         rows = self._load_cve_rows(cve_db_path)
         if not rows:
@@ -154,17 +198,13 @@ class CVERagIndex:
             logger.info("RAG: no documents after filter; skipping build")
             return False
 
-        vectorizer = TfidfVectorizer(
-            stop_words="english",
-            ngram_range=(1, 2),
-            max_features=50000,
-            sublinear_tf=True,
-        )
+        vectorizer = _new_vectorizer()
         matrix = vectorizer.fit_transform(documents)
 
         self._vectorizer = vectorizer
         self._matrix = matrix
         self._cve_meta = meta
+        self._documents = documents
         self._loaded = True
         logger.info(f"RAG index built: {len(meta)} CVEs, vocab={len(vectorizer.vocabulary_)}")
         return True

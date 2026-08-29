@@ -3,7 +3,6 @@ Notification Manager
 Sends notifications via Email, Slack, and Discord
 """
 
-import json
 import re
 import smtplib
 from email.mime.text import MIMEText
@@ -189,7 +188,7 @@ class NotificationManager:
             return True
         
         except Exception as e:
-            logger.error(f"Error sending email notification: {e}")
+            logger.error(f"Error sending email notification ({type(e).__name__})")
             return False
     
     def _send_slack(self, data: Dict) -> bool:
@@ -241,7 +240,7 @@ class NotificationManager:
             return True
         
         except Exception as e:
-            logger.error(f"Error sending Slack notification: {e}")
+            logger.error(f"Error sending Slack notification ({type(e).__name__})")
             return False
     
     def _send_slack_critical(self, data: Dict) -> bool:
@@ -289,7 +288,7 @@ class NotificationManager:
             return True
         
         except Exception as e:
-            logger.error(f"Error sending Slack critical alert: {e}")
+            logger.error(f"Error sending Slack critical alert ({type(e).__name__})")
             return False
     
     def _send_discord(self, data: Dict) -> bool:
@@ -333,14 +332,11 @@ class NotificationManager:
             if avatar_url:
                 message["avatar_url"] = avatar_url
 
-            logger.debug(f"Sending Discord notification to: {webhook_url[:50]}...")
-            logger.debug(f"Payload: {json.dumps(message, indent=2)}")
+            logger.debug("Sending Discord notification")
 
             response = requests.post(webhook_url, json=message, timeout=10)
 
-            # Log response details for debugging
             logger.debug(f"Discord API response status: {response.status_code}")
-            logger.debug(f"Discord API response: {response.text}")
 
             response.raise_for_status()
 
@@ -348,19 +344,17 @@ class NotificationManager:
             return True
 
         except requests.exceptions.HTTPError as e:
-            logger.error(f"Discord webhook HTTP error: {e}")
+            logger.error("Discord webhook HTTP error")
             logger.error(f"Response status: {e.response.status_code if e.response else 'N/A'}")
-            logger.error(f"Response body: {e.response.text if e.response else 'N/A'}")
             return False
         except requests.exceptions.Timeout:
             logger.error("Discord webhook request timed out after 10 seconds")
             return False
         except requests.exceptions.RequestException as e:
-            logger.error(f"Discord webhook request error: {e}")
+            logger.error(f"Discord webhook request error ({type(e).__name__})")
             return False
         except Exception as e:
-            logger.error(f"Unexpected error sending Discord notification: {e}")
-            logger.exception("Full traceback:")
+            logger.error(f"Unexpected error sending Discord notification ({type(e).__name__})")
             return False
     
     def _send_discord_critical(self, data: Dict) -> bool:
@@ -396,21 +390,20 @@ class NotificationManager:
             }
 
             # Build message payload
-            message = {
-                "content": f"@here **CRITICAL VULNERABILITY DETECTED!**",  # Mention everyone
-                "embeds": [embed]
-            }
+            content = "**CRITICAL VULNERABILITY DETECTED!**"
+            if discord_config.get("mention_here", False):
+                content = "@here " + content
+            message = {"content": content, "embeds": [embed]}
             if username:
                 message["username"] = username
             if avatar_url:
                 message["avatar_url"] = avatar_url
 
-            logger.debug(f"Sending critical Discord alert to: {webhook_url[:50]}...")
+            logger.debug("Sending critical Discord alert")
 
             response = requests.post(webhook_url, json=message, timeout=10)
 
             logger.debug(f"Discord API response status: {response.status_code}")
-            logger.debug(f"Discord API response: {response.text}")
 
             response.raise_for_status()
 
@@ -418,19 +411,17 @@ class NotificationManager:
             return True
 
         except requests.exceptions.HTTPError as e:
-            logger.error(f"Discord critical alert HTTP error: {e}")
+            logger.error("Discord critical alert HTTP error")
             logger.error(f"Response status: {e.response.status_code if e.response else 'N/A'}")
-            logger.error(f"Response body: {e.response.text if e.response else 'N/A'}")
             return False
         except requests.exceptions.Timeout:
             logger.error("Discord critical alert request timed out")
             return False
         except requests.exceptions.RequestException as e:
-            logger.error(f"Discord critical alert request error: {e}")
+            logger.error(f"Discord critical alert request error ({type(e).__name__})")
             return False
         except Exception as e:
-            logger.error(f"Unexpected error sending Discord critical alert: {e}")
-            logger.exception("Full traceback:")
+            logger.error(f"Unexpected error sending Discord critical alert ({type(e).__name__})")
             return False
     
     def _create_email_html(self, data: Dict) -> str:

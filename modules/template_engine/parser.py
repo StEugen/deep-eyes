@@ -79,3 +79,18 @@ def validate_template(data: Dict, source_path: str = "<inline>") -> None:
                 raise TemplateError(
                     f"{source_path}: http[{i}].matchers[{j}].type '{mtype}' invalid"
                 )
+            if mtype == "dsl":
+                from modules.template_engine.matcher import validate_dsl_expression
+
+                expressions = m.get("dsl", [])
+                if not isinstance(expressions, list) or not expressions:
+                    raise TemplateError(
+                        f"{source_path}: http[{i}].matchers[{j}].dsl must be a non-empty list"
+                    )
+                for expression in expressions:
+                    try:
+                        validate_dsl_expression(expression)
+                    except ValueError as exc:
+                        raise TemplateError(
+                            f"{source_path}: http[{i}].matchers[{j}] contains unsafe DSL: {exc}"
+                        ) from exc

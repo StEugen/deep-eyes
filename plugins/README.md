@@ -64,7 +64,7 @@ Enable plugins in `config/config.yaml`:
 plugin_manager:
   enabled: true
   plugin_directory: "plugins"
-  auto_load: true
+  allowed_plugins: ["my_custom_scanner.py"]
 
 # Plugin-specific configuration
 plugins:

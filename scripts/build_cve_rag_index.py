@@ -38,7 +38,7 @@ def main():
 
     rag = CVERagIndex(config)
     print(f"Building RAG index from {args.cve_db} ...")
-    success = rag.build(args.cve_db, interactive=True)
+    success = rag.build(args.cve_db, interactive=False)
     if not success:
         print("[!] Build failed (sklearn missing, DB missing, or empty)")
         sys.exit(1)

@@ -2,8 +2,6 @@
 
 Lazy-loads openpyxl. Five sheets: Summary, Vulnerabilities, Reconnaissance, CVEs, Compliance (placeholder).
 """
-import sys
-import subprocess
 from datetime import datetime, timezone
 from typing import Dict, List
 
@@ -44,32 +42,12 @@ _EVIDENCE_LIMIT = 1000
 
 
 def _ensure_openpyxl(interactive: bool = True) -> bool:
-    """Try to import openpyxl. Prompt for install if missing."""
+    """Return whether openpyxl is installed; never install at runtime."""
+    del interactive  # retained for API compatibility
     try:
         import openpyxl  # noqa: F401
         return True
     except ImportError:
-        pass
-
-    if not interactive or not sys.stdin.isatty():
-        return False
-
-    try:
-        answer = input("[!] xlsx export needs openpyxl. Install now? [y/N]: ")
-    except (EOFError, KeyboardInterrupt):
-        return False
-
-    if answer.strip().lower() not in ("y", "yes"):
-        return False
-
-    try:
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "openpyxl"],
-            check=True,
-        )
-        import openpyxl  # noqa: F401
-        return True
-    except (subprocess.CalledProcessError, ImportError):
         return False
 
 
@@ -285,7 +263,7 @@ def build_xlsx(results: Dict, output_path: str, interactive: bool = True) -> boo
     Args:
         results: Scan result dict.
         output_path: Path to write .xlsx file.
-        interactive: If True, prompt to install openpyxl when missing.
+        interactive: Retained for API compatibility; no runtime installation occurs.
 
     Returns:
         True on success, False if openpyxl unavailable or write failed.
