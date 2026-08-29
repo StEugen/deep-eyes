@@ -226,6 +226,7 @@ deep-eye/
 | Doc | Content |
 |-----|---------|
 | [docs/QUICKSTART.md](docs/QUICKSTART.md) | Install + first scan |
+| [docs/DOCKER.md](docs/DOCKER.md) | Least-privilege container build and run |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Full YAML reference |
 | [docs/MODULES.md](docs/MODULES.md) | Module catalog |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layers + contracts |
